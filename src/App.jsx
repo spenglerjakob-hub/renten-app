@@ -49,6 +49,9 @@ export default function App() {
   const [hasChildren, setHasChildren] = useState(true);
   const [isMarried, setIsMarried] = useState(false); 
   const [showRealValue, setShowRealValue] = useState(false);
+  
+  // Kirchensteuer State
+  const [hasChurchTax, setHasChurchTax] = useState(false);
 
   // Krankenversicherungs-Status
   const [kvStatus, setKvStatus] = useState('kvdr'); 
@@ -63,6 +66,7 @@ export default function App() {
   const [privateMonthly, setPrivateMonthly] = useState(0);
   const [expectedReturnAcc, setExpectedReturnAcc] = useState(6.0);
   const [expectedReturnWith, setExpectedReturnWith] = useState(3.0);
+  const [etfTer, setEtfTer] = useState(0.2); 
   const [withdrawalRate, setWithdrawalRate] = useState(4.0);
   const [includeEtfInNet, setIncludeEtfInNet] = useState(true);
 
@@ -74,14 +78,11 @@ export default function App() {
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState('s1');
   const [expandedSections, setExpandedSections] = useState({ s1: true, s2: true, s3: true });
-  
-  // View Toggle für rechte Spalte
   const [rightView, setRightView] = useState('zusammensetzung'); 
   const [hoveredData, setHoveredData] = useState(null); 
 
-  // Planer States
+  // Planer States 
   const [planerCapital, setPlanerCapital] = useState(250000);
-  const [planerInvestment, setPlanerInvestment] = useState(50000);
   const [planerWithdrawal, setPlanerWithdrawal] = useState(1000);
   const [planerReturn, setPlanerReturn] = useState(3.0);
   const [planerDynamic, setPlanerDynamic] = useState(2.0);
@@ -101,9 +102,11 @@ export default function App() {
       setExpectedReturnAcc(6.0);
       setExpectedReturnWith(3.5);
       setKvStatus('kvdr');
+      setHasChurchTax(true);
       setContracts([
         { id: 1, layer: 1, type: 'basis', name: 'Rürup Rente', gross: 300 },
         { id: 2, layer: 2, type: 'bav', name: 'bAV Direktversicherung', gross: 250 },
+        { id: 6, layer: 2, type: 'bavKapital', name: 'bAV Kapitalauszahlung', gross: 50000, includeInNet: true },
         { id: 3, layer: 2, type: 'riester', name: 'Fonds-Riester', gross: 150 },
         { id: 4, layer: 3, type: 'prvRente', name: 'Private Rente Klassik', gross: 120 },
         { id: 5, layer: 3, type: 'prvKapital', name: 'Fonds-Police (Kapital)', gross: 45000, startYear: 2010, monthlyPremium: 100, dynamic: 5, includeInNet: true }
@@ -123,6 +126,9 @@ export default function App() {
     if (defaultType === 'prvKapital') {
       newContract = { ...newContract, startYear: new Date().getFullYear() - 5, monthlyPremium: 100, dynamic: 3, includeInNet: true };
     }
+    if (defaultType === 'bavKapital') {
+      newContract = { ...newContract, includeInNet: true };
+    }
     setContracts([...contracts, newContract]);
   };
 
@@ -136,10 +142,10 @@ export default function App() {
 
   const handleLoadPlaner = () => {
     const etf = calculations.etfTotalCapital || 0;
-    const prv = calculations.contracts.filter(c => c.type === 'prvKapital').reduce((s, c) => s + (c.netCapital || 0), 0);
+    const prv = calculations.contracts.filter(c => c.type === 'prvKapital' || c.type === 'bavKapital').reduce((s, c) => s + (c.netCapital || 0), 0);
     setPlanerCapital(Math.round(etf + prv));
     setIncludeEtfInNet(false);
-    setContracts(prev => prev.map(c => c.type === 'prvKapital' ? { ...c, includeInNet: false } : c));
+    setContracts(prev => prev.map(c => (c.type === 'prvKapital' || c.type === 'bavKapital') ? { ...c, includeInNet: false } : c));
   };
 
   // --- BERECHNUNGSLOGIK ---
@@ -151,6 +157,7 @@ export default function App() {
 
     const ertragsanteilRate = getErtragsanteil(retirementAge);
     const taxBasePercent = Math.min(1.0, 0.84 + (Math.max(0, retirementYear - 2026) * 0.005));
+    const kistRate = hasChurchTax ? 0.08 : 0;
     
     const kvRateFull = 0.175; 
     const kvRateHalf = kvRateFull / 2; 
@@ -199,6 +206,7 @@ export default function App() {
           deductible_kvpv += kvpv_deduction;
         }
       }
+      // bavKapital fließt nicht in das monatliche zvE ein (wird separat mit Fünftelregelung besteuert)
       else if (c.type === 'riester') {
         zvE_contribution = c.gross; 
         total_income_for_freiwillig += c.gross;
@@ -228,7 +236,10 @@ export default function App() {
     const estPlus100 = calculateESt(zvE_yearly + 100, isMarried);
     const marginalTaxRate = (estPlus100 - yearlyESt) / 100;
 
-    const grvNet = Math.max(0, grvFutureGross - grvKvpv - ((grvFutureGross - rentenFreibetrag) * avgTaxRate));
+    const grvESt = (grvFutureGross - rentenFreibetrag) * avgTaxRate;
+    const grvKist = grvESt * kistRate;
+    const grvNet = Math.max(0, grvFutureGross - grvKvpv - grvESt - grvKist);
+    
     let s1_net = grvNet;
     let s2_net = 0;
     let s3_net = 0;
@@ -236,20 +247,52 @@ export default function App() {
     const finalizedContracts = processedContracts.map(c => {
       let net = 0;
       let tax = 0;
+      let kist = 0;
 
       if (c.type === 'basis') {
         tax = c.zvE_contribution * avgTaxRate;
-        net = c.gross - tax;
+        kist = tax * kistRate;
+        net = c.gross - tax - kist;
         s1_net += net;
       } 
       else if (c.type === 'bav' || c.type === 'riester') {
         tax = c.zvE_contribution * avgTaxRate;
-        net = c.gross - (kvStatus === 'kvdr' ? c.kvpv_deduction : 0) - tax;
+        kist = tax * kistRate;
+        net = c.gross - (kvStatus === 'kvdr' ? c.kvpv_deduction : 0) - tax - kist;
         s2_net += net;
+      }
+      else if (c.type === 'bavKapital') {
+        const taxFuenftel = (calculateESt(zvE_yearly + (c.gross / 5), isMarried) - yearlyESt) * 5;
+        const kistFuenftel = taxFuenftel * kistRate;
+        
+        const monthlyBavGross = c.gross / 120;
+        let monthlyKvPv = 0;
+        
+        if (kvStatus === 'kvdr' || kvStatus === 'freiwillig') {
+          const kv = Math.max(0, monthlyBavGross - bavFreibetragKV) * kvRateFull;
+          const pv = monthlyBavGross > bavFreibetragKV ? monthlyBavGross * pvRateFull : 0;
+          monthlyKvPv = kv + pv;
+        }
+        
+        const totalKvPv = monthlyKvPv * 120;
+        
+        tax = taxFuenftel;
+        kist = kistFuenftel;
+        c.kvpv_deduction = totalKvPv;
+        c.netCapital = Math.max(0, c.gross - tax - kist - totalKvPv);
+        
+        const monthlyFromCapital = (c.netCapital * (withdrawalRate / 100)) / 12;
+        c.monthlyNet = monthlyFromCapital;
+        
+        if (c.includeInNet !== false) {
+           net = monthlyFromCapital;
+           s2_net += net;
+        }
       }
       else if (c.type === 'prvRente') {
         tax = c.zvE_contribution * avgTaxRate;
-        net = c.gross - tax;
+        kist = tax * kistRate;
+        net = c.gross - tax - kist;
         s3_net += net;
       }
       else if (c.type === 'prvKapital') {
@@ -262,11 +305,24 @@ export default function App() {
         }
         
         const profit = Math.max(0, c.gross - totalPremiums);
-        const taxHalb = profit * 0.5 * 0.85 * marginalTaxRate;
-        const taxAbgeltung = profit * 0.85 * 0.26375;
         
-        tax = Math.min(taxHalb, taxAbgeltung);
-        const netCapital = Math.max(0, c.gross - tax);
+        const taxHalb = profit * 0.5 * 0.85 * marginalTaxRate;
+        const kistHalb = taxHalb * kistRate;
+        
+        const abgeltungRate = hasChurchTax ? 0.278186 : 0.26375;
+        const taxAbgeltung = profit * 0.85 * abgeltungRate;
+        
+        if ((taxHalb + kistHalb) < taxAbgeltung) {
+          tax = taxHalb;
+          kist = kistHalb;
+          c.appliedTaxMethod = 'Halbeinkünfte';
+        } else {
+          tax = taxAbgeltung; 
+          kist = 0; 
+          c.appliedTaxMethod = 'Abgeltungsteuer';
+        }
+        
+        const netCapital = Math.max(0, c.gross - tax - kist);
         c.netCapital = netCapital;
         
         const monthlyFromCapital = (netCapital * (withdrawalRate / 100)) / 12;
@@ -276,22 +332,33 @@ export default function App() {
            net = monthlyFromCapital;
            s3_net += net;
         }
-
         c.profit = profit;
-        c.appliedTaxMethod = taxHalb < taxAbgeltung ? 'Halbeinkünfte' : 'Abgeltungsteuer';
       }
 
-      return { ...c, net, tax };
+      return { ...c, net, tax, kist };
     });
 
-    const r_monthly_acc = (expectedReturnAcc / 100) / 12;
+    // Berechnung der echten Netto-Renditen nach Kosten (TER)
+    const netReturnAcc = Math.max(0, expectedReturnAcc - etfTer);
+    const netReturnWith = Math.max(0, expectedReturnWith - etfTer);
+
+    const r_monthly_acc = (netReturnAcc / 100) / 12;
     const months = yearsToRetirement * 12;
-    const etfCapFuture = privateCapital * Math.pow(1 + (expectedReturnAcc/100), yearsToRetirement);
-    const etfMonthlyFuture = privateMonthly > 0 && months > 0 ? privateMonthly * ((Math.pow(1 + r_monthly_acc, months) - 1) / r_monthly_acc) : 0;
+    const etfCapFuture = (privateCapital || 0) * Math.pow(1 + (netReturnAcc/100), yearsToRetirement);
+    
+    // VERHINDERT NaN FEHLER: Fallback, falls r_monthly_acc === 0 (z.B. wenn erwartete Rendite - TER <= 0)
+    let etfMonthlyFuture = 0;
+    if (privateMonthly > 0 && months > 0) {
+      etfMonthlyFuture = r_monthly_acc === 0 
+        ? privateMonthly * months 
+        : privateMonthly * ((Math.pow(1 + r_monthly_acc, months) - 1) / r_monthly_acc);
+    }
     
     const etfTotalCapital = etfCapFuture + etfMonthlyFuture;
     const etfGrossMonthly = (etfTotalCapital * (withdrawalRate / 100)) / 12;
-    const etfTax = etfGrossMonthly * 0.11; 
+    
+    const etfTaxRate = hasChurchTax ? 0.12 : 0.1145;
+    const etfTax = etfGrossMonthly * etfTaxRate; 
     const etfNet = etfGrossMonthly - etfTax;
     
     if (includeEtfInNet) s3_net += etfNet;
@@ -300,7 +367,7 @@ export default function App() {
     const chartData = [];
     let curEtfChart = etfTotalCapital;
     let curEtfWithChart = etfGrossMonthly * 12;
-    let curPlanerChart = Math.max(0, planerCapital - planerInvestment);
+    let curPlanerChart = Math.max(0, planerCapital);
     let curPlanerWithChart = planerWithdrawal * 12;
     let etfRunOutAge = retirementAge;
     let isDepleted = false;
@@ -310,7 +377,7 @@ export default function App() {
       chartData.push({ age, etf: Math.max(0, curEtfChart), planer: Math.max(0, curPlanerChart), discount });
 
       if (curEtfChart > 0) {
-        curEtfChart = curEtfChart * (1 + expectedReturnWith / 100) - curEtfWithChart;
+        curEtfChart = curEtfChart * (1 + netReturnWith / 100) - curEtfWithChart;
         if (curEtfChart <= 0 && !isDepleted) {
           etfRunOutAge = age;
           isDepleted = true;
@@ -331,22 +398,22 @@ export default function App() {
     return {
       yearsToRetirement, targetIncomeFuture, targetIncomeToday: currentNetIncome * 0.8,
       inflationFactor, chartData,
-      zvE_yearly, yearlyESt, avgTaxRate, marginalTaxRate, deductible_kvpv, rentenFreibetrag, ertragsanteilRate,
-      grvFutureGross, grvNet, grvKvpv,
+      zvE_yearly, yearlyESt, avgTaxRate, marginalTaxRate, deductible_kvpv, rentenFreibetrag, ertragsanteilRate, kistRate,
+      grvFutureGross, grvNet, grvKvpv, grvESt, grvKist,
       s1_net, s2_net, s3_net,
       contracts: finalizedContracts,
       etfTotalCapital, etfGrossMonthly, etfNet, etfRunOutAge, isDepleted,
       totalNetFuture, gap
     };
   }, [
-    currentAge, retirementAge, currentNetIncome, hasChildren, isMarried, kvStatus, pkvPremium,
+    currentAge, retirementAge, currentNetIncome, hasChildren, isMarried, kvStatus, pkvPremium, hasChurchTax,
     grvGross, grvIncreaseRate, 
-    privateCapital, privateMonthly, expectedReturnAcc, expectedReturnWith, withdrawalRate, includeEtfInNet,
-    contracts, planerCapital, planerInvestment, planerWithdrawal, planerReturn, planerDynamic, includePlanerInNet
+    privateCapital, privateMonthly, expectedReturnAcc, expectedReturnWith, etfTer, withdrawalRate, includeEtfInNet,
+    contracts, planerCapital, planerWithdrawal, planerReturn, planerDynamic, includePlanerInNet
   ]);
 
   const planerCalculations = useMemo(() => {
-    const nettoVerrentungsKapital = Math.max(0, planerCapital - planerInvestment);
+    const nettoVerrentungsKapital = Math.max(0, planerCapital);
     let currentCap = nettoVerrentungsKapital;
     let currentWith = planerWithdrawal * 12;
     let yearsLasted = 0;
@@ -366,22 +433,13 @@ export default function App() {
       runOutAge: retirementAge + yearsLasted,
       lastsForever: yearsLasted >= 99
     };
-  }, [planerCapital, planerInvestment, planerWithdrawal, planerReturn, planerDynamic, retirementAge]);
+  }, [planerCapital, planerWithdrawal, planerReturn, planerDynamic, retirementAge]);
 
 
   // --- RENDER HELPERS ---
   const formatCurrency = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val);
-  
-  const formatResultCurrency = (val) => {
-    const adjustedVal = showRealValue ? val / calculations.inflationFactor : val;
-    return formatCurrency(adjustedVal);
-  };
-
-  const formatChartCurrency = (val, discount) => {
-    const adjustedVal = showRealValue ? val / discount : val;
-    return formatCurrency(adjustedVal);
-  };
-
+  const formatResultCurrency = (val) => formatCurrency(showRealValue ? val / calculations.inflationFactor : val);
+  const formatChartCurrency = (val, discount) => formatCurrency(showRealValue ? val / discount : val);
   const formatYAxis = (val) => {
     if (val >= 1000000) return (val / 1000000).toFixed(1).replace('.0', '') + ' Mio.';
     if (val >= 1000) return (val / 1000).toFixed(0) + 'k';
@@ -399,28 +457,42 @@ export default function App() {
             <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Vertragsart</label>
             <select value={c.type} onChange={e => updateContract(c.id, 'type', e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm bg-slate-50 focus:bg-white">
               {c.layer === 1 && <option value="basis">Rürup / Basisrente</option>}
-              {c.layer === 2 && <><option value="bav">Betriebliche Altersvorsorge (bAV)</option><option value="riester">Riester-Rente</option></>}
-              {c.layer === 3 && <><option value="prvRente">Private Rente (monatlich)</option><option value="prvKapital">Private Rente (Kapitalauszahlung)</option></>}
+              {c.layer === 2 && (
+                <>
+                  <option value="bav">Betriebliche Altersvorsorge (Rente)</option>
+                  <option value="bavKapital">Betriebliche Altersvorsorge (Kapital)</option>
+                  <option value="riester">Riester-Rente</option>
+                </>
+              )}
+              {c.layer === 3 && (
+                <>
+                  <option value="prvRente">Private Rente (monatlich)</option>
+                  <option value="prvKapital">Private Rente (Kapitalauszahlung)</option>
+                </>
+              )}
             </select>
           </div>
           <div>
             <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Bezeichnung</label>
-            <input type="text" value={c.name} onChange={e => updateContract(c.id, 'name', e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm" placeholder="z.B. Allianz Riester" />
+            <input type="text" value={c.name} onChange={e => updateContract(c.id, 'name', e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm" placeholder="z.B. Allianz" />
           </div>
         </div>
         <div>
           <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">
-            {c.type === 'prvKapital' ? 'Erwartete Kapitalauszahlung (€ Brutto)' : 'Erwartete Rente (€/Monat Brutto)'}
+            {c.type.includes('Kapital') ? 'Erwartete Kapitalauszahlung (€ Brutto)' : 'Erwartete Rente (€/Monat Brutto)'}
           </label>
           <input type="number" value={c.gross || ''} onChange={e => updateContract(c.id, 'gross', Number(e.target.value))} className="w-full border border-slate-300 rounded p-2 text-sm font-semibold" />
         </div>
-        {c.type === 'prvKapital' && (
+        
+        {(c.type === 'prvKapital' || c.type === 'bavKapital') && (
           <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
-            <div className="grid grid-cols-3 gap-3">
-              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Beginn (Jahr)</label><input type="number" value={c.startYear || ''} onChange={e => updateContract(c.id, 'startYear', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Mtl. Beitrag (€)</label><input type="number" value={c.monthlyPremium || ''} onChange={e => updateContract(c.id, 'monthlyPremium', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Dynamik (%)</label><input type="number" step="0.1" value={c.dynamic || ''} onChange={e => updateContract(c.id, 'dynamic', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-            </div>
+            {c.type === 'prvKapital' && (
+              <div className="grid grid-cols-3 gap-3">
+                <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Beginn (Jahr)</label><input type="number" value={c.startYear || ''} onChange={e => updateContract(c.id, 'startYear', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+                <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Mtl. Beitrag (€)</label><input type="number" value={c.monthlyPremium || ''} onChange={e => updateContract(c.id, 'monthlyPremium', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+                <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Dynamik (%)</label><input type="number" step="0.1" value={c.dynamic || ''} onChange={e => updateContract(c.id, 'dynamic', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+              </div>
+            )}
             <div className="flex items-center gap-2 pt-1">
               <input type="checkbox" checked={c.includeInNet !== false} onChange={e => updateContract(c.id, 'includeInNet', e.target.checked)} className="rounded text-emerald-600 focus:ring-emerald-500 w-3 h-3" />
               <label className="text-[10px] text-slate-600 font-medium cursor-pointer" onClick={() => updateContract(c.id, 'includeInNet', c.includeInNet === false)}>
@@ -441,22 +513,31 @@ export default function App() {
   const bottomPadding = 40;
   const graphHeight = svgHeight - paddingY - bottomPadding;
 
-  const maxDataVal = Math.max(...calculations.chartData.map(d => {
-    const vEtf = showRealValue ? d.etf / d.discount : d.etf;
-    const vPlaner = showRealValue ? d.planer / d.discount : d.planer;
-    return Math.max(vEtf, vPlaner);
-  }));
-  const maxY = Math.max(100, maxDataVal * 1.1); 
+  // VERHINDERT NaN FEHLER: Sicheres Abgreifen von maxDataVal ohne Absturz bei leeren oder fehlerhaften Chart-Einträgen
+  const maxDataVal = calculations.chartData.length > 0 
+    ? Math.max(0, ...calculations.chartData.map(d => {
+        const vEtf = showRealValue ? (d.etf / d.discount) : d.etf;
+        const vPlaner = showRealValue ? (d.planer / d.discount) : d.planer;
+        const val = Math.max(vEtf || 0, vPlaner || 0);
+        return isNaN(val) ? 0 : val;
+      }))
+    : 0;
+
+  const maxY = Math.max(100, (isNaN(maxDataVal) ? 0 : maxDataVal) * 1.1); 
 
   const getX = (index) => paddingX + (index / (calculations.chartData.length - 1)) * (svgWidth - paddingX * 2);
-  const getY = (val) => svgHeight - bottomPadding - (val / maxY) * graphHeight;
+  
+  // VERHINDERT NaN FEHLER: Sicheres Fallback, falls y-Wert oder Maximalwert fehlerhaft sind
+  const getY = (val) => {
+    if (isNaN(val) || isNaN(maxY) || maxY === 0) return svgHeight - bottomPadding;
+    return svgHeight - bottomPadding - (val / maxY) * graphHeight;
+  };
 
   const etfPath = calculations.chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(showRealValue ? d.etf / d.discount : d.etf)}`).join(" ");
   const planerPath = calculations.chartData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(showRealValue ? d.planer / d.discount : d.planer)}`).join(" ");
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map(mult => maxY * mult);
 
   return (
-    // WebkitPrintColorAdjust erzwingt, dass Hintergrundfarben (wie der dunkle Header) mitgedruckt werden
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-12 print:bg-white print:pb-0" style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
       
       {/* Header */}
@@ -466,7 +547,7 @@ export default function App() {
             <ShieldAlert className="w-8 h-8 text-emerald-400" />
             <div>
               <h1 className="text-2xl font-bold">Vorsorge-Analyzer Pro</h1>
-              <p className="text-slate-400 text-sm">Präzisions-Engine 2026 inkl. KV-Status</p>
+              <p className="text-slate-400 text-sm">Präzisions-Engine 2026 inkl. KV-Status & KiSt</p>
             </div>
           </div>
           
@@ -482,7 +563,6 @@ export default function App() {
               <Users className="w-4 h-4" /> Verheiratet
             </button>
             <div className="w-px bg-slate-700 mx-1"></div>
-            {/* NEU: PDF EXPORT BUTTON */}
             <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-bold bg-rose-600 text-white shadow hover:bg-rose-500 transition-all">
               <Download className="w-4 h-4" /> PDF Report
             </button>
@@ -490,7 +570,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Exklusiver Druck-Header (Nur auf dem PDF sichtbar) */}
+      {/* Exklusiver Druck-Header */}
       <div className="hidden print:block max-w-6xl mx-auto p-6 text-center border-b-2 border-slate-200 mb-6">
         <h2 className="text-2xl font-bold text-slate-800 uppercase tracking-widest">Persönliches Vorsorge-Gutachten</h2>
         <p className="text-slate-500 mt-2">Erstellt auf Basis der Steuer- und Sozialgesetzgebung 2026</p>
@@ -499,13 +579,13 @@ export default function App() {
           <span>•</span>
           <span>KV-Status: {kvStatus === 'pkv' ? 'Privat' : kvStatus === 'freiwillig' ? 'Freiwillig GKV' : 'Pflicht (KVdR)'}</span>
           <span>•</span>
-          <span>Darstellung: {showRealValue ? 'Kaufkraft heute (Inflationsbereinigt)' : 'Nominalwert bei Renteneintritt'}</span>
+          <span>Darstellung: {showRealValue ? 'Kaufkraft heute' : 'Nominalwert'}</span>
         </div>
       </div>
 
       <main className="max-w-6xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 print:p-0 print:block">
         
-        {/* LEFT COLUMN: Inputs -> WIRD BEIM DRUCKEN AUSGEBLENDET (print:hidden) */}
+        {/* LEFT COLUMN: Inputs */}
         <div className="lg:col-span-6 xl:col-span-5 space-y-6 print:hidden">
           
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
@@ -519,7 +599,7 @@ export default function App() {
               <input type="number" value={currentNetIncome} onChange={e => setCurrentNetIncome(Number(e.target.value))} className="w-full border rounded p-2" />
             </div>
             
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-3">
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-3 mb-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1"><Activity className="w-3 h-3"/> Krankenversicherung im Alter</label>
                 <select value={kvStatus} onChange={e => setKvStatus(e.target.value)} className="w-full border rounded p-2 text-sm">
@@ -535,7 +615,17 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div className="mt-4 flex items-center gap-2"><input type="checkbox" checked={hasChildren} onChange={e => setHasChildren(e.target.checked)} className="rounded" /><label className="text-xs text-slate-600">Kinder vorhanden (PV-Zuschlag entfällt)</label></div>
+
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <input type="checkbox" checked={hasChildren} onChange={e => setHasChildren(e.target.checked)} className="rounded" />
+                <label className="text-xs text-slate-600">Kinder vorhanden (PV-Zuschlag entfällt)</label>
+              </div>
+              <div className="flex items-center gap-2">
+                <input type="checkbox" checked={hasChurchTax} onChange={e => setHasChurchTax(e.target.checked)} className="rounded text-indigo-600" />
+                <label className="text-xs text-slate-600">Kirchensteuer berechnen (8 %)</label>
+              </div>
+            </div>
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -568,7 +658,7 @@ export default function App() {
                 <div className="space-y-5">
                   <div className="bg-purple-50 p-3 rounded text-xs text-purple-800 border border-purple-100 flex gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>bAV unterliegt voll der KV/PV, Riester ist KV/PV-frei.</span>
+                    <span>bAV unterliegt voll der KV/PV, Riester ist KV/PV-frei. <br/>Kapitalauszahlungen werden über 120 Monate auf die GKV umgelegt.</span>
                   </div>
                   {contracts.filter(c => c.layer === 2).map(renderContractInput)}
                   <button onClick={() => addContract(2)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded-lg text-slate-500 font-medium text-sm hover:border-purple-400 hover:text-purple-600 flex items-center justify-center gap-2 transition-colors"><PlusCircle className="w-4 h-4" /> Vertrag hinzufügen</button>
@@ -594,9 +684,10 @@ export default function App() {
                       <div><label className="block text-xs font-semibold text-slate-600 mb-1">Aktuelles Kapital (€)</label><input type="number" value={privateCapital} onChange={e => setPrivateCapital(Number(e.target.value))} className="w-full border rounded p-2" /></div>
                       <div><label className="block text-xs font-semibold text-slate-600 mb-1">Sparrate (€/Monat)</label><input type="number" value={privateMonthly} onChange={e => setPrivateMonthly(Number(e.target.value))} className="w-full border rounded p-2" /></div>
                     </div>
-                    <div className="grid grid-cols-3 gap-3 pt-2 border-t border-emerald-100">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-emerald-100">
                       <div><label className="block text-[10px] font-semibold text-slate-600 mb-1">Rendite Anspar. (%)</label><input type="number" step="0.1" value={expectedReturnAcc} onChange={e => setExpectedReturnAcc(Number(e.target.value))} className="w-full border border-emerald-100 rounded p-1.5 text-xs bg-emerald-50" /></div>
                       <div><label className="block text-[10px] font-semibold text-slate-600 mb-1">Rendite Entn. (%)</label><input type="number" step="0.1" value={expectedReturnWith} onChange={e => setExpectedReturnWith(Number(e.target.value))} className="w-full border border-emerald-100 rounded p-1.5 text-xs bg-emerald-50" /></div>
+                      <div><label className="block text-[10px] font-semibold text-slate-600 mb-1">Kosten p.a. (TER %)</label><input type="number" step="0.01" value={etfTer} onChange={e => setEtfTer(Number(e.target.value))} className="w-full border border-emerald-100 rounded p-1.5 text-xs bg-emerald-50 text-rose-600" /></div>
                       <div><label className="block text-[10px] font-semibold text-slate-600 mb-1">Entnahme (%)</label><input type="number" step="0.1" value={withdrawalRate} onChange={e => setWithdrawalRate(Number(e.target.value))} className="w-full border border-emerald-100 rounded p-1.5 text-xs bg-emerald-50" /></div>
                     </div>
                     <div className="flex items-center gap-2 mt-4 pt-3 border-t border-emerald-100">
@@ -617,14 +708,10 @@ export default function App() {
                       <div className="bg-white p-4 rounded-lg border border-indigo-100 shadow-sm space-y-4">
                         <div>
                           <div className="flex justify-between items-end mb-1">
-                            <label className="block text-xs font-semibold text-slate-600">Vorhandenes Kapital (€)</label>
-                            <button onClick={handleLoadPlaner} className="text-[9px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded hover:bg-indigo-200 transition-colors font-medium flex items-center gap-1">Aus Schicht 3 laden</button>
+                            <label className="block text-xs font-semibold text-slate-600">Start-Kapital zum Rentenbeginn (€)</label>
+                            <button onClick={handleLoadPlaner} className="text-[9px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded hover:bg-indigo-200 transition-colors font-medium flex items-center gap-1">Aus Schicht 2+3 laden</button>
                           </div>
                           <input type="number" value={planerCapital} onChange={e => setPlanerCapital(Number(e.target.value))} className="w-full border border-slate-300 rounded p-2 bg-slate-50" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-600 mb-1">Einmalige Investition/Ausgabe (€)</label>
-                          <input type="number" value={planerInvestment} onChange={e => setPlanerInvestment(Number(e.target.value))} className="w-full border border-rose-200 rounded p-2 focus:ring-rose-500" />
                         </div>
                         <div className="pt-3 border-t border-slate-100 grid grid-cols-3 gap-3">
                           <div className="col-span-3 sm:col-span-1"><label className="block text-[10px] font-semibold text-slate-600 mb-1">Wunsch-Entnahme mtl.</label><input type="number" value={planerWithdrawal} onChange={e => setPlanerWithdrawal(Number(e.target.value))} className="w-full border border-slate-300 rounded p-2 text-sm" /></div>
@@ -637,9 +724,7 @@ export default function App() {
                         </div>
                       </div>
                       <div className="bg-indigo-900 rounded-lg p-5 text-white shadow-inner">
-                        <div className="text-xs text-indigo-300 mb-1">Übrigens Netto-Kapital für die Verrentung</div>
-                        <div className="text-2xl font-bold mb-4">{formatCurrency(planerCalculations.nettoVerrentungsKapital)}</div>
-                        <div className="border-t border-indigo-700/50 pt-4 flex justify-between items-center">
+                        <div className="border-b border-indigo-700/50 pb-4 mb-4 flex justify-between items-center">
                           <div>
                             <div className="text-xs text-indigo-300 mb-1">Reicht bei {planerDynamic}% Dynamik für:</div>
                             <div className="font-bold text-lg text-emerald-400">{planerCalculations.lastsForever ? <><InfinityIcon className="w-4 h-4 inline" /> Jahre</> : `${planerCalculations.yearsLasted} Jahre`}</div>
@@ -664,10 +749,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Dashboard & Results -> WIRD BEIM DRUCKEN AUF VOLLE BREITE GESETZT (print:col-span-12 print:w-full) */}
+        {/* RIGHT COLUMN: Dashboard & Results */}
         <div className="lg:col-span-6 xl:col-span-7 space-y-6 print:col-span-12 print:w-full print:block">
           
-          {/* KPI CARDS - IMMER SICHTBAR */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 relative overflow-hidden print:border-slate-300">
               <div className="absolute top-0 right-0 p-4 opacity-10"><TrendingUp className="w-16 h-16" /></div>
@@ -699,6 +783,7 @@ export default function App() {
               <h3 className="font-bold text-white flex items-center gap-2 print:text-slate-800"><Calculator className="w-4 h-4 text-indigo-400 print:text-indigo-600" /> Progressions-Steuerengine 2026</h3>
               <div className="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400 flex gap-2 print:bg-white print:border print:border-slate-300 print:text-slate-600">
                 <span>{isMarried ? 'Splitting' : 'Grundtarif'}</span>
+                {hasChurchTax && <span className="text-indigo-300 print:text-indigo-600 ml-1">inkl. KiSt</span>}
               </div>
             </div>
             <div className="grid grid-cols-4 gap-4 text-sm divide-x divide-slate-700 print:divide-slate-300">
@@ -721,7 +806,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* VIEW TOGGLE - UMSCHALTER -> WIRD BEIM DRUCKEN AUSGEBLENDET (print:hidden) */}
           <div className="flex bg-slate-200/50 p-1 rounded-lg w-full mb-4 border border-slate-200 print:hidden">
             <button onClick={() => setRightView('zusammensetzung')} className={`flex-1 py-2 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 ${rightView === 'zusammensetzung' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
               <List className="w-4 h-4" /> Kassenbon & Netto
@@ -731,7 +815,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* ZUSAMMENSETZUNG (KASSENBON) -> BEIM DRUCKEN IMMER ANZEIGEN (print:block) */}
           <div className={`bg-white rounded-xl shadow-sm border border-slate-200 p-6 print:shadow-none print:border-slate-300 ${rightView === 'zusammensetzung' ? 'block' : 'hidden'} print:block print:break-inside-avoid`}>
             <h2 className="text-sm font-bold mb-4 text-slate-700">Zusammensetzung Ihres Gesamt-Nettos</h2>
             <div className="mb-6">
@@ -757,16 +840,15 @@ export default function App() {
                   <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-500 print:bg-slate-800"></div><span className="font-bold text-sm text-blue-900 print:text-slate-800">Schicht 1 (Basis)</span></div>
                   <div className="flex items-center gap-3"><span className="font-bold">{formatResultCurrency(calculations.s1_net)}</span><ChevronDown className="w-4 h-4 text-slate-400 print:hidden" /></div>
                 </div>
-                {/* CSS Trick: Im PDF immer öffnen (print:block) unabhängig von React State */}
                 <div className={`p-3 bg-white text-xs border-t border-blue-100 space-y-2 print:border-slate-300 ${expandedSections.s1 ? 'block' : 'hidden'} print:block`}>
                   <div className="flex justify-between items-center bg-slate-50 p-2 rounded print:border print:border-slate-200">
                     <div><span className="font-semibold block">Gesetzliche Rente</span><span className="text-[10px] text-slate-500">Brutto: {formatResultCurrency(calculations.grvFutureGross)}</span></div>
-                    <div className="text-right"><span className="font-bold block">{formatResultCurrency(calculations.grvNet)}</span><span className="text-[10px] text-rose-500">KV/PV: {formatResultCurrency(calculations.grvKvpv)} | ESt: {formatResultCurrency((calculations.grvFutureGross - calculations.rentenFreibetrag) * calculations.avgTaxRate)}</span></div>
+                    <div className="text-right"><span className="font-bold block">{formatResultCurrency(calculations.grvNet)}</span><span className="text-[10px] text-rose-500">KV/PV: {formatResultCurrency(calculations.grvKvpv)} | ESt{hasChurchTax ? '+KiSt' : ''}: {formatResultCurrency(calculations.grvESt + calculations.grvKist)}</span></div>
                   </div>
                   {calculations.contracts.filter(c => c.layer === 1).map(c => (
                     <div key={c.id} className="flex justify-between items-center bg-slate-50 p-2 rounded print:border print:border-slate-200">
                       <div><span className="font-semibold block">{c.name}</span><span className="text-[10px] text-slate-500">Brutto: {formatResultCurrency(c.gross)}</span></div>
-                      <div className="text-right"><span className="font-bold block">{formatResultCurrency(c.net)}</span><span className="text-[10px] text-rose-500">ESt: {formatResultCurrency(c.tax)} (KV/PV-frei)</span></div>
+                      <div className="text-right"><span className="font-bold block">{formatResultCurrency(c.net)}</span><span className="text-[10px] text-rose-500">ESt{hasChurchTax ? '+KiSt' : ''}: {formatResultCurrency(c.tax + (c.kist || 0))} (KV/PV-frei)</span></div>
                     </div>
                   ))}
                 </div>
@@ -781,8 +863,23 @@ export default function App() {
                   {calculations.contracts.filter(c => c.layer === 2).length === 0 && <div className="text-slate-400 italic">Keine Verträge in Schicht 2</div>}
                   {calculations.contracts.filter(c => c.layer === 2).map(c => (
                     <div key={c.id} className="flex justify-between items-center bg-slate-50 p-2 rounded print:border print:border-slate-200">
-                      <div><span className="font-semibold block">{c.name}</span><span className="text-[10px] text-slate-500">{c.type === 'bav' ? 'bAV' : 'Riester'} | Brutto: {formatResultCurrency(c.gross)}</span></div>
-                      <div className="text-right"><span className="font-bold block">{formatResultCurrency(c.net)}</span><span className="text-[10px] text-rose-500">{c.kvpv_deduction > 0 ? `KV/PV: ${formatResultCurrency(c.kvpv_deduction)} | ` : ''}ESt: {formatResultCurrency(c.tax)}</span></div>
+                      <div>
+                        <span className="font-semibold block">{c.name}</span>
+                        <span className="text-[10px] text-slate-500">
+                          {c.type === 'bavKapital' ? `bAV Kapitalauszahlung | Bruttokapital: ${formatResultCurrency(c.gross)}` : `${c.type === 'bav' ? 'bAV' : 'Riester'} | Brutto: ${formatResultCurrency(c.gross)}`}
+                        </span>
+                        {c.type === 'bavKapital' && <div className="text-[9px] text-purple-600 mt-1 font-medium">Berechnet nach Fünftelregelung & 120-Monats-KV-Regel</div>}
+                      </div>
+                      <div className="text-right">
+                        <span className={`font-bold block ${c.type === 'bavKapital' && c.includeInNet === false ? 'text-slate-400' : ''}`}>
+                          {c.type === 'bavKapital' && c.includeInNet === false ? formatResultCurrency(0) : formatResultCurrency(c.net)}
+                        </span>
+                        <span className="text-[10px] text-rose-500">
+                          {c.type === 'bavKapital' && c.includeInNet === false ? 'Nicht angerechnet' : (
+                            <>{c.kvpv_deduction > 0 ? `KV/PV: ${formatResultCurrency(c.kvpv_deduction)} | ` : ''}ESt{hasChurchTax ? '+KiSt' : ''}: {formatResultCurrency(c.tax + (c.kist || 0))}</>
+                          )}
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -808,7 +905,7 @@ export default function App() {
                           {c.type === 'prvKapital' && c.includeInNet === false ? formatResultCurrency(0) : formatResultCurrency(c.net)}
                         </span>
                         <span className="text-[10px] text-rose-500">
-                           {c.type === 'prvKapital' && c.includeInNet === false ? 'Nicht angerechnet' : `Steuerlast: ${formatResultCurrency(c.tax)}`}
+                           {c.type === 'prvKapital' && c.includeInNet === false ? 'Nicht angerechnet' : `Steuerlast${hasChurchTax ? ' inkl. KiSt' : ''}: ${formatResultCurrency(c.tax + (c.kist || 0))}`}
                         </span>
                       </div>
                     </div>
@@ -821,7 +918,7 @@ export default function App() {
                         {includeEtfInNet ? formatResultCurrency(calculations.etfNet) : formatResultCurrency(0)}
                       </span>
                       <span className="text-[10px] text-rose-500">
-                        {!includeEtfInNet ? 'Nicht angerechnet' : `Abgeltung: ${formatResultCurrency(calculations.etfGrossMonthly - calculations.etfNet)}`}
+                        {!includeEtfInNet ? 'Nicht angerechnet' : `Abgeltung${hasChurchTax ? '+KiSt' : ''}: ${formatResultCurrency(calculations.etfGrossMonthly - calculations.etfNet)}`}
                       </span>
                     </div>
                   </div>
@@ -842,7 +939,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* VERMÖGENSVERLAUF (CHART) -> BEIM DRUCKEN IMMER ANZEIGEN (print:block print:mt-8) */}
           <div className={`bg-white rounded-xl shadow-sm border border-slate-200 p-6 print:shadow-none print:border-slate-300 relative h-[480px] print:h-auto print:mt-12 print:break-inside-avoid ${rightView === 'verlauf' ? 'block' : 'hidden'} print:block`}>
             <h2 className="text-sm font-bold mb-2 text-slate-700 print:text-lg">Kapitalverlauf in der Entnahmephase</h2>
             <p className="text-xs text-slate-500 mb-6 print:text-sm">
@@ -882,7 +978,6 @@ export default function App() {
                    <path d={planerPath} fill="none" stroke="#6366f1" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="6 4" />
                 )}
 
-                {/* Hover Interaction Areas - Print verborgen */}
                 {calculations.chartData.map((d, i) => {
                   const rectWidth = (svgWidth - paddingX * 2) / (calculations.chartData.length - 1);
                   return (
@@ -911,7 +1006,6 @@ export default function App() {
                 <div className="flex items-center gap-1.5 text-indigo-600 print:text-slate-800"><div className="w-3 h-1 border-b-2 border-indigo-500 border-dashed rounded"></div> Entnahme-Planer</div>
               </div>
 
-              {/* Tooltip - Print verborgen */}
               {hoveredData && (
                 <div className="absolute bg-slate-900 text-white p-3 rounded-lg shadow-xl text-sm z-10 pointer-events-none transition-all duration-75 border border-slate-700 min-w-[180px] print:hidden" 
                   style={{ top: '10%', ...(hoveredData.index > calculations.chartData.length / 2 ? { right: `${100 - ((getX(hoveredData.index) / svgWidth) * 100) + 2}%` } : { left: `${(getX(hoveredData.index) / svgWidth) * 100 + 2}%` }) }}
