@@ -3,7 +3,7 @@ import {
   Upload, FileText, TrendingUp, AlertCircle, Calculator, 
   CheckCircle, ChevronDown, ChevronUp, ShieldAlert, PiggyBank, 
   Briefcase, PlusCircle, Trash, Users, User, Info, Coins, Clock, Infinity as InfinityIcon, Wallet, Activity,
-  LineChart as LineChartIcon, List, Download
+  LineChart as LineChartIcon, List, Download, Home
 } from 'lucide-react';
 
 // --- STEUER-ENGINE (EStG Formel Approximation verschoben auf 2026) ---
@@ -45,7 +45,7 @@ export default function App() {
   // --- STATE MANAGEMENT ---
   const [currentAge, setCurrentAge] = useState(35);
   const [retirementAge, setRetirementAge] = useState(67);
-  const [currentNetIncome, setCurrentNetIncome] = useState(3000);
+  const [targetIncomeToday, setTargetIncomeToday] = useState(2400); // NEU: Manueller Zielbedarf
   const [hasChildren, setHasChildren] = useState(true);
   const [isMarried, setIsMarried] = useState(false); 
   const [showRealValue, setShowRealValue] = useState(false);
@@ -71,6 +71,7 @@ export default function App() {
   // Lösungs-Rechner & Indexierung
   const [useTaxIndexation, setUseTaxIndexation] = useState(true);
   const [solutionSavingsReturn, setSolutionSavingsReturn] = useState(5.0);
+  const [solutionSavingsDynamic, setSolutionSavingsDynamic] = useState(3.0);
 
   // Multi-Vertrags-Logik
   const [contracts, setContracts] = useState([]);
@@ -82,7 +83,7 @@ export default function App() {
   const [expandedSections, setExpandedSections] = useState({ s1: true, s2: true, s3: true });
   const [rightView, setRightView] = useState('zusammensetzung'); 
   const [hoveredData, setHoveredData] = useState(null); 
-  const [showTaxInfo, setShowTaxInfo] = useState(false); // NEU: Steuer-Erklärungsfenster
+  const [showTaxInfo, setShowTaxInfo] = useState(false); 
 
   const [planerCapital, setPlanerCapital] = useState(250000);
   const [planerWithdrawal, setPlanerWithdrawal] = useState(1000);
@@ -111,7 +112,8 @@ export default function App() {
         { id: 6, layer: 2, type: 'bavKapital', name: 'bAV Kapitalauszahlung', gross: 50000, includeInNet: true },
         { id: 3, layer: 2, type: 'riester', name: 'Fonds-Riester', gross: 150 },
         { id: 4, layer: 3, type: 'prvRente', name: 'Private Rente Klassik', gross: 120 },
-        { id: 5, layer: 3, type: 'prvKapital', name: 'Fonds-Police (Kapital)', gross: 45000, startYear: 2010, monthlyPremium: 100, dynamic: 5, includeInNet: true }
+        { id: 5, layer: 3, type: 'prvKapital', name: 'Fonds-Police (Kapital)', gross: 45000, startYear: 2010, monthlyPremium: 100, dynamic: 5, includeInNet: true },
+        { id: 7, layer: 3, type: 'immobilie', name: 'Eigentumswohnung', gross: 800, costs: 20, dynamic: 1.5, includeInNet: true }
       ]);
       setIncludeEtfInNet(true);
       setIncludePlanerInNet(false);
@@ -138,6 +140,20 @@ export default function App() {
     setContracts(contracts.map(c => c.id === id ? { ...c, [field]: value } : c));
   };
 
+  const handleContractTypeChange = (id, newType) => {
+    setContracts(contracts.map(c => {
+        if (c.id === id) {
+            let updates = { type: newType, gross: c.gross || 0 };
+            if (newType === 'immobilie') {
+                 updates.costs = 20;
+                 updates.dynamic = 1.5;
+            }
+            return { ...c, ...updates };
+        }
+        return c;
+    }));
+  };
+
   const removeContract = (id) => {
     setContracts(contracts.filter(c => c.id !== id));
   };
@@ -154,7 +170,7 @@ export default function App() {
   const calculations = useMemo(() => {
     const yearsToRetirement = Math.max(0, retirementAge - currentAge);
     const inflationFactor = Math.pow(1.02, yearsToRetirement);
-    const targetIncomeFuture = (currentNetIncome * 0.8) * inflationFactor;
+    const targetIncomeFuture = targetIncomeToday * inflationFactor; // NEU: Basierend auf manuellem Input
     const retirementYear = new Date().getFullYear() + yearsToRetirement;
 
     const ertragsanteilRate = getErtragsanteil(retirementAge);
@@ -214,6 +230,16 @@ export default function App() {
         zvE_contribution = c.gross * ertragsanteilRate; 
         total_income_for_freiwillig += c.gross; 
       }
+      // NEU: Logik für Vermietung (Immobilie)
+      else if (c.type === 'immobilie') {
+        const futureGross = c.gross * Math.pow(1 + (c.dynamic || 0) / 100, yearsToRetirement);
+        const taxableRent = futureGross * (1 - (c.costs !== undefined ? c.costs : 20) / 100);
+        c.futureGross = futureGross;
+        c.taxableRent = taxableRent;
+        zvE_contribution = taxableRent; // Miete ist voll steuerpflichtig
+        total_income_for_freiwillig += taxableRent; // Miete fließt voll in die KV-Bemessung ein!
+      }
+
       zvE_total += zvE_contribution;
       return { ...c, zvE_contribution, kvpv_deduction };
     });
@@ -301,6 +327,15 @@ export default function App() {
         net = (c.netCapital * (withdrawalRate / 100)) / 12;
         if (c.includeInNet !== false) s3_net += net;
       }
+      else if (c.type === 'immobilie') {
+        tax = c.taxableRent * avgTaxRate;
+        kist = tax * kistRate;
+        net = c.taxableRent - tax - kist;
+        // Bei KVdR fällt keine KV an. Bei 'freiwillig' ist die Miete in 'total_income_for_freiwillig' geflossen 
+        // und die KV-Last wurde bereits global von der GRV (grvNet) abgezogen. Daher hier kein direkter Abzug nötig.
+        if (c.includeInNet !== false) s3_net += net;
+      }
+
       return { ...c, net, tax, kist };
     });
 
@@ -315,7 +350,7 @@ export default function App() {
 
     const gap = Math.max(0, targetIncomeFuture - (s1_net + s2_net + s3_net));
 
-    // --- LÖSUNGS-RECHNER LOGIK ---
+    // --- LÖSUNGS-RECHNER LOGIK MIT DYNAMIK ---
     const solutionYears = 25;
     const solutionRetirementReturn = 2.0;
     const r_ret = (solutionRetirementReturn / 100) / 12;
@@ -330,14 +365,34 @@ export default function App() {
       }
     }
 
-    const r_save = (solutionSavingsReturn / 100) / 12;
-    const n_save = yearsToRetirement * 12;
+    const n_years = yearsToRetirement;
+    const dyn = solutionSavingsDynamic / 100;
+    const r_m = (solutionSavingsReturn / 100) / 12;
+    
     let requiredSavings = 0;
-    if (requiredCapital > 0 && n_save > 0) {
-      if (r_save > 0) {
-        requiredSavings = requiredCapital * r_save / (Math.pow(1 + r_save, n_save) - 1);
-      } else {
-        requiredSavings = requiredCapital / n_save;
+    if (requiredCapital > 0 && n_years > 0) {
+      if (r_m > 0) {
+        if (dyn === 0) {
+          const n_months = n_years * 12;
+          requiredSavings = requiredCapital * r_m / (Math.pow(1 + r_m, n_months) - 1);
+        } else {
+          const r_a = Math.pow(1 + r_m, 12) - 1; 
+          const C = (Math.pow(1 + r_m, 12) - 1) / r_m; 
+          
+          if (Math.abs(r_a - dyn) < 0.00001) {
+            requiredSavings = requiredCapital / (C * n_years * Math.pow(1 + r_a, n_years - 1));
+          } else {
+            const factor = (Math.pow(1 + r_a, n_years) - Math.pow(1 + dyn, n_years)) / (r_a - dyn);
+            requiredSavings = requiredCapital / (C * factor);
+          }
+        }
+      } else { 
+        if (dyn === 0) {
+          requiredSavings = requiredCapital / (n_years * 12);
+        } else {
+          const factor = (Math.pow(1 + dyn, n_years) - 1) / dyn;
+          requiredSavings = requiredCapital / (12 * factor);
+        }
       }
     }
 
@@ -352,17 +407,17 @@ export default function App() {
     }
 
     return {
-      yearsToRetirement, targetIncomeFuture, targetIncomeToday: currentNetIncome * 0.8, retirementYear,
+      yearsToRetirement, targetIncomeFuture, targetIncomeToday, retirementYear,
       inflationFactor, chartData, zvE_yearly: zvE_yearly_nominal, yearlyESt, avgTaxRate, marginalTaxRate: marginalTaxToday, deductible_kvpv, rentenFreibetrag, ertragsanteilRate, kistRate,
       grvFutureGross, grvNet, grvKvpv, grvESt, grvKist, s1_net, s2_net, s3_net, contracts: finalizedContracts,
       etfTotalCapital, etfGrossMonthly, etfNet, totalNetFuture: s1_net + s2_net + s3_net, gap,
       requiredCapital, requiredSavings
     };
   }, [
-    currentAge, retirementAge, currentNetIncome, hasChildren, isMarried, kvStatus, pkvPremium, hasChurchTax,
+    currentAge, retirementAge, targetIncomeToday, hasChildren, isMarried, kvStatus, pkvPremium, hasChurchTax,
     grvGross, grvIncreaseRate, privateCapital, privateMonthly, expectedReturnAcc, expectedReturnWith, etfTer, withdrawalRate, includeEtfInNet,
     contracts, planerCapital, planerWithdrawal, planerReturn, planerDynamic, includePlanerInNet,
-    useTaxIndexation, solutionSavingsReturn
+    useTaxIndexation, solutionSavingsReturn, solutionSavingsDynamic
   ]);
 
   const planerCalculations = useMemo(() => {
@@ -412,10 +467,10 @@ export default function App() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3 pr-6">
         <div>
           <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Vertragsart</label>
-          <select value={c.type} onChange={e => updateContract(c.id, 'type', e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm bg-slate-50 focus:bg-white">
+          <select value={c.type} onChange={e => handleContractTypeChange(c.id, e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm bg-slate-50 focus:bg-white">
             {c.layer === 1 && <option value="basis">Rürup / Basisrente</option>}
             {c.layer === 2 && <><option value="bav">bAV (Rente)</option><option value="bavKapital">bAV (Kapital)</option><option value="riester">Riester-Rente</option></>}
-            {c.layer === 3 && <><option value="prvRente">Private Rente (monatlich)</option><option value="prvKapital">Private Rente (Kapitalauszahlung)</option></>}
+            {c.layer === 3 && <><option value="prvRente">Private Rente (monatlich)</option><option value="prvKapital">Private Rente (Kapitalauszahlung)</option><option value="immobilie">Vermietung (Immobilie)</option></>}
           </select>
         </div>
         <div>
@@ -423,10 +478,22 @@ export default function App() {
           <input type="text" value={c.name} onChange={e => updateContract(c.id, 'name', e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm" placeholder="z.B. Allianz" />
         </div>
       </div>
-      <div>
-        <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">{c.type.includes('Kapital') ? 'Kapitalauszahlung (€ Brutto)' : 'Rente (€/Monat Brutto)'}</label>
-        <input type="number" value={c.gross || ''} onChange={e => updateContract(c.id, 'gross', Number(e.target.value))} className="w-full border border-slate-300 rounded p-2 text-sm font-semibold" />
-      </div>
+      
+      {c.type !== 'immobilie' && (
+        <div>
+          <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">{c.type.includes('Kapital') ? 'Kapitalauszahlung (€ Brutto)' : 'Rente (€/Monat Brutto)'}</label>
+          <input type="number" value={c.gross || ''} onChange={e => updateContract(c.id, 'gross', Number(e.target.value))} className="w-full border border-slate-300 rounded p-2 text-sm font-semibold" />
+        </div>
+      )}
+
+      {c.type === 'immobilie' && (
+        <div className="grid grid-cols-3 gap-3 mt-1">
+          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Kaltmiete (€/M)</label><input type="number" value={c.gross || ''} onChange={e => updateContract(c.id, 'gross', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
+          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Instandhaltung (%)</label><input type="number" step="1" value={c.costs !== undefined ? c.costs : 20} onChange={e => updateContract(c.id, 'costs', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Miet-Dyn. p.a. (%)</label><input type="number" step="0.1" value={c.dynamic !== undefined ? c.dynamic : 1.5} onChange={e => updateContract(c.id, 'dynamic', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+        </div>
+      )}
+
       {(c.type === 'prvKapital' || c.type === 'bavKapital') && (
         <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
           {c.type === 'prvKapital' && (
@@ -440,6 +507,13 @@ export default function App() {
             <input type="checkbox" checked={c.includeInNet !== false} onChange={e => updateContract(c.id, 'includeInNet', e.target.checked)} className="rounded text-emerald-600 w-3 h-3" />
             <label className="text-[10px] text-slate-600 font-medium cursor-pointer" onClick={() => updateContract(c.id, 'includeInNet', c.includeInNet === false)}>In mtl. Rente umwandeln & ins Gesamt-Netto einrechnen</label>
           </div>
+        </div>
+      )}
+
+      {c.type === 'immobilie' && (
+        <div className="flex items-center gap-2 pt-3 border-t border-slate-100 mt-3">
+          <input type="checkbox" checked={c.includeInNet !== false} onChange={e => updateContract(c.id, 'includeInNet', e.target.checked)} className="rounded text-emerald-600 w-3 h-3" />
+          <label className="text-[10px] text-slate-600 font-medium cursor-pointer" onClick={() => updateContract(c.id, 'includeInNet', c.includeInNet === false)}>In Gesamt-Netto übernehmen</label>
         </div>
       )}
     </div>
@@ -483,8 +557,8 @@ export default function App() {
               <div><label className="block text-xs font-semibold text-slate-500 mb-1">Renteneintritt</label><input type="number" value={retirementAge} onChange={e => setRetirementAge(Number(e.target.value))} className="w-full border rounded p-2" /></div>
             </div>
             <div className="mb-4">
-              <label className="block text-xs font-semibold text-slate-500 mb-1">Heutiges Haushalts-Netto (€)</label>
-              <input type="number" value={currentNetIncome} onChange={e => setCurrentNetIncome(Number(e.target.value))} className="w-full border rounded p-2" />
+              <label className="block text-xs font-semibold text-indigo-600 mb-1">Gewünschtes Netto im Alter (Kaufkraft heute in €)</label>
+              <input type="number" value={targetIncomeToday} onChange={e => setTargetIncomeToday(Number(e.target.value))} className="w-full border border-indigo-200 bg-indigo-50/50 rounded p-2 font-bold text-indigo-900" />
             </div>
             <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-3 mb-4">
               <div>
@@ -533,7 +607,7 @@ export default function App() {
               {activeTab === 's3' && (
                 <div className="space-y-6">
                   {contracts.filter(c => c.layer === 3).map(renderContractInput)}
-                  <button onClick={() => addContract(3)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded text-slate-500 flex items-center justify-center gap-2 transition-colors hover:border-emerald-400 hover:text-emerald-600"><PlusCircle className="w-4 h-4" /> PRV hinzufügen</button>
+                  <button onClick={() => addContract(3)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded text-slate-500 flex items-center justify-center gap-2 transition-colors hover:border-emerald-400 hover:text-emerald-600"><PlusCircle className="w-4 h-4" /> Privat / Immobilie hinzufügen</button>
                   <div className="bg-white p-4 rounded-lg border border-emerald-200 shadow-sm">
                     <h3 className="text-sm font-bold text-emerald-800 mb-3 flex items-center gap-2"><PiggyBank className="w-4 h-4" /> Freies Depot (ETFs)</h3>
                     <div className="grid grid-cols-2 gap-4 mb-3">
@@ -618,12 +692,12 @@ export default function App() {
                   )}
                 </p>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div className="bg-slate-800/40 p-4 rounded-lg print:bg-white print:border">
-                    <h4 className="font-bold text-slate-200 print:text-slate-800 text-xs mb-3 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div> Grundfreibetrag (Einkommensteuer)</h4>
+                    <h4 className="font-bold text-slate-200 print:text-slate-800 text-xs mb-3 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div> Grundfreibetrag (ESt)</h4>
                     <ul className="space-y-2 text-xs">
                       <li className="flex justify-between items-center text-slate-400 print:text-slate-600"><span>Stand Heute (2026):</span> <span>{formatCurrency(isMarried ? 24696 : 12348)}</span></li>
-                      <li className="flex justify-between items-center text-indigo-300 print:text-indigo-700 font-bold"><span>Zum Renteneintritt ({calculations.retirementYear}):</span> <span>{formatCurrency((isMarried ? 24696 : 12348) * (useTaxIndexation ? calculations.inflationFactor : 1))}</span></li>
+                      <li className="flex justify-between items-center text-indigo-300 print:text-indigo-700 font-bold"><span>Rentenstart ({calculations.retirementYear}):</span> <span>{formatCurrency((isMarried ? 24696 : 12348) * (useTaxIndexation ? calculations.inflationFactor : 1))}</span></li>
                     </ul>
                     <p className="text-[10px] text-slate-500 print:text-slate-500 mt-3 pt-3 border-t border-slate-700 print:border-slate-200">
                       Ihr simuliertes zu versteuerndes Einkommen wird intern auf die heutige Kaufkraft heruntergerechnet, daraufhin wird der heutige Steuersatz ermittelt.
@@ -631,13 +705,25 @@ export default function App() {
                   </div>
 
                   <div className="bg-slate-800/40 p-4 rounded-lg print:bg-white print:border">
-                    <h4 className="font-bold text-slate-200 print:text-slate-800 text-xs mb-3 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-emerald-400"></div> Beitragsbemessungsgrenze (KV/PV)</h4>
+                    <h4 className="font-bold text-slate-200 print:text-slate-800 text-xs mb-3 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-emerald-400"></div> Bemessungsgrenze (KV/PV)</h4>
                     <ul className="space-y-2 text-xs">
                       <li className="flex justify-between items-center text-slate-400 print:text-slate-600"><span>Stand Heute (2026):</span> <span>5.812 € / Monat</span></li>
-                      <li className="flex justify-between items-center text-emerald-300 print:text-emerald-700 font-bold"><span>Zum Renteneintritt ({calculations.retirementYear}):</span> <span>{formatCurrency(5812.50 * (useTaxIndexation ? Math.pow(1.02, calculations.yearsToRetirement) : 1))} / Monat</span></li>
+                      <li className="flex justify-between items-center text-emerald-300 print:text-emerald-700 font-bold"><span>Rentenstart ({calculations.retirementYear}):</span> <span>{formatCurrency(5812.50 * (useTaxIndexation ? Math.pow(1.02, calculations.yearsToRetirement) : 1))} / Monat</span></li>
                     </ul>
                     <p className="text-[10px] text-slate-500 print:text-slate-500 mt-3 pt-3 border-t border-slate-700 print:border-slate-200">
                       Auch die Grenzen für Sozialabgaben (KV/PV) wachsen jährlich mit der Lohnentwicklung (ca. 2 % p.a.) mit.
+                    </p>
+                  </div>
+
+                  {/* NEU: bAV Freibetrag KV Kachel */}
+                  <div className="bg-slate-800/40 p-4 rounded-lg print:bg-white print:border">
+                    <h4 className="font-bold text-slate-200 print:text-slate-800 text-xs mb-3 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-purple-400"></div> bAV Freibetrag (KV/PV)</h4>
+                    <ul className="space-y-2 text-xs">
+                      <li className="flex justify-between items-center text-slate-400 print:text-slate-600"><span>Stand Heute (2026):</span> <span>{formatCurrency(197.75)} / Monat</span></li>
+                      <li className="flex justify-between items-center text-purple-300 print:text-purple-700 font-bold"><span>Rentenstart ({calculations.retirementYear}):</span> <span>{formatCurrency(197.75 * (useTaxIndexation ? Math.pow(1.02, calculations.yearsToRetirement) : 1))} / Monat</span></li>
+                    </ul>
+                    <p className="text-[10px] text-slate-500 print:text-slate-500 mt-3 pt-3 border-t border-slate-700 print:border-slate-200">
+                      Der Freibetrag für Betriebsrenten (bAV) ist an die Bezugsgröße gekoppelt und wächst ebenfalls künftig mit, um Sie real vor Abgaben zu schützen.
                     </p>
                   </div>
                 </div>
@@ -729,18 +815,23 @@ export default function App() {
                   {calculations.contracts.filter(c => c.layer === 3).map(c => (
                     <div key={c.id} className="flex justify-between items-start bg-slate-50 p-2 rounded print:border print:border-slate-200">
                       <div>
-                        <span className="font-semibold block">{c.name}</span>
+                        <span className="font-semibold block flex items-center gap-1">
+                           {c.type === 'immobilie' && <Home className="w-3 h-3 text-emerald-600" />} {c.name}
+                        </span>
                         <span className="text-[10px] text-slate-500">
-                          {c.type === 'prvRente' ? `Brutto: ${formatResultCurrency(c.gross)} (Ertragsanteil: ${Math.round(calculations.ertragsanteilRate * 100)}%)` : `Bruttokapital: ${formatResultCurrency(c.gross)}`}
+                          {c.type === 'prvRente' ? `Brutto: ${formatResultCurrency(c.gross)} (Ertragsanteil: ${Math.round(calculations.ertragsanteilRate * 100)}%)` 
+                          : c.type === 'immobilie' ? `Miete (Netto nach Kosten): ${formatResultCurrency(c.taxableRent)}`
+                          : `Bruttokapital: ${formatResultCurrency(c.gross)}`}
                         </span>
                         {c.type === 'prvKapital' && <div className="text-[9px] text-indigo-500 mt-1 font-medium">Günstigerprüfung: {c.appliedTaxMethod}</div>}
+                        {c.type === 'immobilie' && kvStatus === 'freiwillig' && <div className="text-[9px] text-rose-500 mt-1 font-medium">KV/PV-pflichtig (Freiwillig versichert)</div>}
                       </div>
                       <div className="text-right">
-                        <span className={`font-bold block ${c.type === 'prvKapital' && c.includeInNet === false ? 'text-slate-400' : ''}`}>
-                          {c.type === 'prvKapital' && c.includeInNet === false ? formatResultCurrency(0) : formatResultCurrency(c.net)}
+                        <span className={`font-bold block ${(c.type === 'prvKapital' || c.type === 'immobilie') && c.includeInNet === false ? 'text-slate-400' : ''}`}>
+                          {(c.type === 'prvKapital' || c.type === 'immobilie') && c.includeInNet === false ? formatResultCurrency(0) : formatResultCurrency(c.net)}
                         </span>
                         <span className="text-[10px] text-rose-500">
-                           {c.type === 'prvKapital' && c.includeInNet === false ? 'Nicht angerechnet' : `Steuerlast${hasChurchTax ? ' inkl. KiSt' : ''}: ${formatResultCurrency(c.tax + (c.kist || 0))}`}
+                           {(c.type === 'prvKapital' || c.type === 'immobilie') && c.includeInNet === false ? 'Nicht angerechnet' : `Steuerlast${hasChurchTax ? ' inkl. KiSt' : ''}: ${formatResultCurrency(c.tax + (c.kist || 0))}`}
                         </span>
                       </div>
                     </div>
@@ -849,20 +940,39 @@ export default function App() {
                       <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 print:bg-slate-50 print:border-slate-200">
                           <div className="text-xs text-slate-400 mb-1 print:text-slate-500">Benötigtes Kapital zu Rentenbeginn</div>
                           <div className="text-2xl font-bold text-emerald-400">{formatResultCurrency(calculations.requiredCapital)}</div>
-                          <div className="text-[10px] text-slate-500 mt-2">Reicht für 25 Jahre (Kapitalverzehr bei 2% p.a. Rendite im Alter), um die mtl. Lücke von {formatResultCurrency(calculations.gap)} auszugleichen.</div>
+                          <div className="text-[10px] text-slate-500 mt-2 leading-relaxed">Reicht für 25 Jahre (Kapitalverzehr bei 2% p.a. Rendite im Alter), um die mtl. Lücke von {formatResultCurrency(calculations.gap)} auszugleichen.</div>
                       </div>
+                      
                       <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 print:bg-slate-50 print:border-slate-200">
-                          <div className="text-xs text-slate-400 mb-1 flex justify-between items-center print:text-slate-500">
-                              <span>Mtl. Sparrate (ab heute)</span>
-                              <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 print:bg-white print:border-slate-300">
-                                  <input type="number" step="0.1" value={solutionSavingsReturn} onChange={e => setSolutionSavingsReturn(Number(e.target.value))} className="w-10 bg-transparent text-right text-xs outline-none text-white print:text-slate-800" />
-                                  <span className="text-[10px] text-slate-400">% Rendite</span>
-                              </div>
+                          <div className="flex justify-between items-start mb-2">
+                              <div className="text-xs text-slate-400 print:text-slate-500">Mtl. Start-Sparrate (heute)</div>
                           </div>
                           <div className="text-2xl font-bold text-white print:text-slate-800">
                               {calculations.yearsToRetirement > 0 ? formatCurrency(calculations.requiredSavings) : "Sofort fällig"}
                           </div>
-                          <div className="text-[10px] text-slate-500 mt-2">Nominale monatliche Sparrate bis zum Renteneintritt (in {calculations.yearsToRetirement} Jahren).</div>
+
+                          <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-slate-700 print:border-slate-300">
+                               <div>
+                                   <label className="block text-[9px] text-slate-400 uppercase mb-0.5">Rendite p.a.</label>
+                                   <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 print:bg-white print:border-slate-300">
+                                        <input type="number" step="0.1" value={solutionSavingsReturn} onChange={e => setSolutionSavingsReturn(Number(e.target.value))} className="w-12 bg-transparent text-xs outline-none text-white print:text-slate-800" />
+                                        <span className="text-[10px] text-slate-400">%</span>
+                                   </div>
+                               </div>
+                               <div>
+                                   <label className="block text-[9px] text-slate-400 uppercase mb-0.5">Dynamik p.a.</label>
+                                   <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 print:bg-white print:border-slate-300">
+                                        <input type="number" step="0.1" value={solutionSavingsDynamic} onChange={e => setSolutionSavingsDynamic(Number(e.target.value))} className="w-12 bg-transparent text-xs outline-none text-white print:text-slate-800" />
+                                        <span className="text-[10px] text-slate-400">%</span>
+                                   </div>
+                               </div>
+                          </div>
+                          
+                          <div className="text-[10px] text-slate-500 mt-3 leading-relaxed">
+                              {solutionSavingsDynamic > 0 
+                                  ? <span>Startrate für das 1. Jahr. Durch die <strong className="text-indigo-400">{solutionSavingsDynamic}% Dynamik</strong> steigt die Rate jährlich. Die letzte Rate vor der Rente (in {calculations.yearsToRetirement} J.) liegt bei ca. {formatCurrency(calculations.requiredSavings * Math.pow(1 + solutionSavingsDynamic/100, Math.max(0, calculations.yearsToRetirement - 1)))}.</span>
+                                  : `Konstante monatliche Sparrate über die restlichen ${calculations.yearsToRetirement} Jahre bis zum Renteneintritt.`}
+                          </div>
                       </div>
                   </div>
               )}
