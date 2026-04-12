@@ -6,6 +6,9 @@ import {
   LineChart as LineChartIcon, List, Download, Home, Save, FolderOpen, Zap
 } from 'lucide-react';
 
+// Helper für Input-Zahlen: Lässt leere Strings zu, damit man Nullen (besonders am Handy) problemlos löschen kann
+const parseNum = (val) => val === '' ? '' : Number(val);
+
 // --- STEUER-ENGINE (EStG Formel Approximation 2026) ---
 const calculateESt = (zve, isMarried) => {
   let x = isMarried ? zve / 2 : zve;
@@ -116,6 +119,7 @@ export default function App() {
   const [hoveredData, setHoveredData] = useState(null); 
   const [showTaxInfo, setShowTaxInfo] = useState(false); 
   const [showBenchmark, setShowBenchmark] = useState(false);
+  const [printExplanationMode, setPrintExplanationMode] = useState('short'); // NEU: Auswahl für PDF-Exkurs
 
   // --- RENTEN-SCHÄTZER STATES & LOGIK ---
   const [estimatorPerson, setEstimatorPerson] = useState(null);
@@ -302,7 +306,6 @@ export default function App() {
         if (c.id === id) {
             let updates = { type: newType, gross: c.gross || 0, payoutStrategy: 'rent' };
             if (newType === 'immobilie') { updates.costs = 20; updates.dynamic = 1.5; }
-            // FIX: Ersetze withdrawalRate durch duration
             if (newType === 'etf') { updates.capital = 0; updates.monthly = 100; updates.returnAcc = 6.0; updates.returnWith = 3.0; updates.ter = 0.2; updates.duration = 25; updates.specialPayment = 0; updates.specialPaymentYear = new Date().getFullYear() + 10; updates.payoutStrategy = 'planer'; }
             return { ...c, ...updates };
         }
@@ -400,24 +403,24 @@ export default function App() {
 
       if (c.type === 'basis') {
         zvE_contribution = c.gross - (c.gross * (1 - cTaxBase)); 
-        if (kvStatus === 'freiwillig') incomeForKV = c.gross;
+        if (kvStatus === 'freiwillig') incomeForKV = Number(c.gross);
       } 
       else if (c.type === 'bav') {
-        zvE_contribution = c.gross; 
+        zvE_contribution = Number(c.gross); 
         if (kvStatus === 'kvdr') {
           const bav_kv = Math.max(0, c.gross - bavFreibetragKV) * kvRateFull;
           const bav_pv = c.gross > bavFreibetragKV ? c.gross * pvRateFull : 0;
           kvpv_deduction = bav_kv + bav_pv;
           deductible_kvpv += kvpv_deduction;
-        } else if (kvStatus === 'freiwillig') incomeForKV = c.gross; 
+        } else if (kvStatus === 'freiwillig') incomeForKV = Number(c.gross); 
       }
       else if (c.type === 'riester') {
-        zvE_contribution = c.gross; 
+        zvE_contribution = Number(c.gross); 
         if (kvStatus === 'freiwillig') incomeForKV = 0; 
       }
       else if (c.type === 'prvRente') {
         zvE_contribution = c.gross * cErtRate; 
-        if (kvStatus === 'freiwillig') incomeForKV = c.gross; 
+        if (kvStatus === 'freiwillig') incomeForKV = Number(c.gross); 
       }
       else if (c.type === 'immobilie') {
         const futureGross = c.gross * Math.pow(1 + (c.dynamic || 0) / 100, maxYearsToRet);
@@ -444,11 +447,10 @@ export default function App() {
         if (c.specialPayment > 0 && c.specialPaymentYear > currentYear) {
             const yearsInvested = baseRetYear - c.specialPaymentYear;
             if (yearsInvested > 0) cap += c.specialPayment * Math.pow(1 + (netReturnAcc/100), yearsInvested);
-            else cap += c.specialPayment; 
+            else cap += Number(c.specialPayment); 
         }
         c.totalCap = cap;
 
-        // FIX: Dynamische ETF-Rente statt starrer %-Satz
         const duration = c.duration !== undefined ? c.duration : 25;
         const netReturnWith = Math.max(0, (c.returnWith || 0) - (c.ter || 0));
         const r_w = netReturnWith / 100;
@@ -590,7 +592,7 @@ export default function App() {
              kist = capKist;
              if (strategy === 'planer') transferredCapital += c.netCapital;
         } else if (strategy === 'rent') {
-             // FIX: Präzise Versteuerung bei monatlicher Entnahme über die Laufzeit
+             // Präzise Versteuerung bei monatlicher Entnahme über die Laufzeit
              const totalPayout = c.grossMonthly * 12 * duration;
              const totalProfit = Math.max(0, totalPayout - totalInvested);
              const profitRatio = totalPayout > 0 ? (totalProfit / totalPayout) : 0;
@@ -611,7 +613,7 @@ export default function App() {
     });
 
     // --- PLANER LOGIK NEU (Inkl. Abgeltungsteuer auf neue Gewinne) ---
-    const effectivePlanerCapital = planerCapital + transferredCapital;
+    const effectivePlanerCapital = Number(planerCapital) + transferredCapital;
     let finalPlanerWithdrawalGross = 0;
     let finalPlanerWithdrawalNet = 0;
     let planerTax = 0;
@@ -774,35 +776,35 @@ export default function App() {
       )}
 
       {c.type !== 'immobilie' && c.type !== 'etf' && (
-        <div><label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">{c.type.includes('Kapital') ? 'Kapitalauszahlung (€ Brutto)' : 'Rente (€/Monat Brutto)'}</label><input type="number" value={c.gross || ''} onChange={e => updateContract(c.id, 'gross', Number(e.target.value))} className="w-full border border-slate-300 rounded p-2 text-sm font-semibold" /></div>
+        <div><label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">{c.type.includes('Kapital') ? 'Kapitalauszahlung (€ Brutto)' : 'Rente (€/Monat Brutto)'}</label><input type="number" value={c.gross ?? ''} onChange={e => updateContract(c.id, 'gross', parseNum(e.target.value))} className="w-full border border-slate-300 rounded p-2 text-sm font-semibold" /></div>
       )}
 
       {c.type === 'immobilie' && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Kaltmiete (€/M)</label><input type="number" value={c.gross || ''} onChange={e => updateContract(c.id, 'gross', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
-          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Instandhaltung (%)</label><input type="number" step="1" value={c.costs !== undefined ? c.costs : 20} onChange={e => updateContract(c.id, 'costs', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Dyn. p.a. (%)</label><input type="number" step="0.1" value={c.dynamic !== undefined ? c.dynamic : 1.5} onChange={e => updateContract(c.id, 'dynamic', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Kaltmiete (€/M)</label><input type="number" value={c.gross ?? ''} onChange={e => updateContract(c.id, 'gross', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
+          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Instandhaltung (%)</label><input type="number" step="1" value={c.costs ?? 20} onChange={e => updateContract(c.id, 'costs', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Dyn. p.a. (%)</label><input type="number" step="0.1" value={c.dynamic ?? 1.5} onChange={e => updateContract(c.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
         </div>
       )}
 
       {c.type === 'etf' && (
         <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Kapital heute (€)</label><input type="number" value={c.capital || ''} onChange={e => updateContract(c.id, 'capital', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Sparrate (€/M)</label><input type="number" value={c.monthly || ''} onChange={e => updateContract(c.id, 'monthly', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
+            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Kapital heute (€)</label><input type="number" value={c.capital ?? ''} onChange={e => updateContract(c.id, 'capital', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
+            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Sparrate (€/M)</label><input type="number" value={c.monthly ?? ''} onChange={e => updateContract(c.id, 'monthly', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
           </div>
           <div className="bg-blue-50/50 p-2 rounded-lg border border-blue-100">
              <label className="block text-[10px] font-bold text-blue-800 mb-2 flex items-center gap-1"><Zap className="w-3 h-3"/> Geplante Sonderzahlung / Einmalanlage</label>
              <div className="grid grid-cols-2 gap-3">
-               <div><label className="block text-[9px] text-slate-500 mb-1">Summe (€)</label><input type="number" value={c.specialPayment || ''} onChange={e => updateContract(c.id, 'specialPayment', Number(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs" placeholder="z.B. Erbe"/></div>
-               <div><label className="block text-[9px] text-slate-500 mb-1">Im Jahr</label><input type="number" value={c.specialPaymentYear || ''} onChange={e => updateContract(c.id, 'specialPaymentYear', Number(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs" /></div>
+               <div><label className="block text-[9px] text-slate-500 mb-1">Summe (€)</label><input type="number" value={c.specialPayment ?? ''} onChange={e => updateContract(c.id, 'specialPayment', parseNum(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs" placeholder="z.B. Erbe"/></div>
+               <div><label className="block text-[9px] text-slate-500 mb-1">Im Jahr</label><input type="number" value={c.specialPaymentYear ?? ''} onChange={e => updateContract(c.id, 'specialPaymentYear', parseNum(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs" /></div>
              </div>
           </div>
           <div className="grid grid-cols-4 gap-2">
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Ansp.</label><input type="number" step="0.1" value={c.returnAcc !== undefined ? c.returnAcc : 6} onChange={e => updateContract(c.id, 'returnAcc', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Entn.</label><input type="number" step="0.1" value={c.returnWith !== undefined ? c.returnWith : 3} onChange={e => updateContract(c.id, 'returnWith', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">TER (%)</label><input type="number" step="0.1" value={c.ter !== undefined ? c.ter : 0.2} onChange={e => updateContract(c.id, 'ter', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-            <div><label className="block text-[10px] font-bold text-indigo-600 mb-1">Dauer Entn. (J)</label><input type="number" step="1" value={c.duration !== undefined ? c.duration : 25} onChange={e => updateContract(c.id, 'duration', Number(e.target.value))} className="w-full border-2 border-indigo-300 rounded p-1.5 text-xs font-bold" /></div>
+            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Ansp.</label><input type="number" step="0.1" value={c.returnAcc ?? 6} onChange={e => updateContract(c.id, 'returnAcc', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Entn.</label><input type="number" step="0.1" value={c.returnWith ?? 3} onChange={e => updateContract(c.id, 'returnWith', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">TER (%)</label><input type="number" step="0.1" value={c.ter ?? 0.2} onChange={e => updateContract(c.id, 'ter', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+            <div><label className="block text-[10px] font-bold text-indigo-600 mb-1">Dauer Entn. (J)</label><input type="number" step="1" value={c.duration ?? 25} onChange={e => updateContract(c.id, 'duration', parseNum(e.target.value))} className="w-full border-2 border-indigo-300 rounded p-1.5 text-xs font-bold" /></div>
           </div>
           <div className="mt-3 pt-3 border-t border-slate-100">
             <label className="block text-[10px] font-semibold text-slate-500 mb-2 uppercase">Auszahlungs-Strategie</label>
@@ -823,9 +825,9 @@ export default function App() {
         <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
           {c.type === 'prvKapital' && (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Beginn (J)</label><input type="number" value={c.startYear || ''} onChange={e => updateContract(c.id, 'startYear', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Beitrag (€)</label><input type="number" value={c.monthlyPremium || ''} onChange={e => updateContract(c.id, 'monthlyPremium', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Dyn. (%)</label><input type="number" step="0.1" value={c.dynamic || ''} onChange={e => updateContract(c.id, 'dynamic', Number(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Beginn (J)</label><input type="number" value={c.startYear ?? ''} onChange={e => updateContract(c.id, 'startYear', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Beitrag (€)</label><input type="number" value={c.monthlyPremium ?? ''} onChange={e => updateContract(c.id, 'monthlyPremium', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Dyn. (%)</label><input type="number" step="0.1" value={c.dynamic ?? ''} onChange={e => updateContract(c.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
             </div>
           )}
           <div className="mt-1">
@@ -878,7 +880,18 @@ export default function App() {
             <button onClick={() => fileInputRef.current.click()} title="Profil laden" className="p-1.5 rounded-md text-slate-400 hover:bg-slate-700 hover:text-white"><FolderOpen className="w-4 h-4" /></button>
             <button onClick={handleExport} title="Profil speichern" className="p-1.5 rounded-md text-slate-400 hover:bg-slate-700 hover:text-white"><Save className="w-4 h-4" /></button>
             
-            <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-rose-600 text-white hover:bg-rose-500 ml-1"><Download className="w-3 h-3" /> PDF</button>
+            <div className="w-px bg-slate-700 mx-1"></div>
+
+            <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium bg-slate-800 border border-slate-700 text-white">
+              <span className="text-slate-400 hidden sm:inline">PDF-Text:</span>
+              <select value={printExplanationMode} onChange={e => setPrintExplanationMode(e.target.value)} className="bg-transparent font-bold outline-none cursor-pointer">
+                <option value="none" className="text-slate-800">Ohne</option>
+                <option value="short" className="text-slate-800">Kurz</option>
+                <option value="long" className="text-slate-800">Ausführlich</option>
+              </select>
+            </div>
+            
+            <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-rose-600 text-white hover:bg-rose-500 shadow-sm ml-1"><Download className="w-3 h-3" /> PDF</button>
           </div>
         </div>
       </header>
@@ -924,7 +937,7 @@ export default function App() {
               <div className="flex justify-between items-center mb-2">
                  <label className="block text-sm font-bold text-indigo-900">Zielnetto im Alter (Kaufkraft heute)</label>
               </div>
-              <input type="number" value={targetIncomeToday} onChange={e => setTargetIncomeToday(Number(e.target.value))} className="w-full border-2 border-indigo-200 bg-white rounded-lg p-3 text-xl font-black text-indigo-900 mb-3 shadow-inner outline-none focus:border-indigo-400 transition-colors" />
+              <input type="number" value={targetIncomeToday} onChange={e => setTargetIncomeToday(parseNum(e.target.value))} className="w-full border-2 border-indigo-200 bg-white rounded-lg p-3 text-xl font-black text-indigo-900 mb-3 shadow-inner outline-none focus:border-indigo-400 transition-colors" />
               
               <div className="border-t-2 border-indigo-200/60 pt-3 mt-3">
                  <button onClick={() => setShowBenchmark(!showBenchmark)} className="w-full flex justify-between items-center text-xs font-extrabold text-indigo-800 uppercase tracking-wide hover:opacity-80 transition-opacity">
@@ -937,11 +950,11 @@ export default function App() {
                          <div className="grid grid-cols-2 gap-4 mb-5">
                            <div>
                              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Heutiges Netto (€/M)</label>
-                             <input type="number" value={currentNetIncome} onChange={e => setCurrentNetIncome(Number(e.target.value))} className="w-full border border-indigo-200 rounded-lg p-2.5 text-sm font-bold bg-white shadow-sm outline-none focus:border-indigo-400" />
+                             <input type="number" value={currentNetIncome} onChange={e => setCurrentNetIncome(parseNum(e.target.value))} className="w-full border border-indigo-200 rounded-lg p-2.5 text-sm font-bold bg-white shadow-sm outline-none focus:border-indigo-400" />
                            </div>
                            <div>
                              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Gehalts-Plus p.a. (%)</label>
-                             <input type="number" step="0.1" value={wageGrowthRate} onChange={e => setWageGrowthRate(Number(e.target.value))} className="w-full border border-indigo-200 rounded-lg p-2.5 text-sm font-bold bg-white shadow-sm outline-none focus:border-indigo-400" />
+                             <input type="number" step="0.1" value={wageGrowthRate} onChange={e => setWageGrowthRate(parseNum(e.target.value))} className="w-full border border-indigo-200 rounded-lg p-2.5 text-sm font-bold bg-white shadow-sm outline-none focus:border-indigo-400" />
                            </div>
                          </div>
                          
@@ -972,7 +985,7 @@ export default function App() {
             <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 mb-4">
               <label className="block text-xs font-semibold text-slate-700 mb-1">Krankenversicherung im Alter (Haushalt)</label>
               <select value={kvStatus} onChange={e => setKvStatus(e.target.value)} className="w-full border rounded p-2 text-sm mb-2"><option value="kvdr">Gesetzlich (KVdR - Pflicht)</option><option value="freiwillig">Gesetzlich (Freiwillig)</option><option value="pkv">Privat versichert (PKV)</option></select>
-              {kvStatus === 'pkv' && <input type="number" value={pkvPremium} onChange={e => setPkvPremium(Number(e.target.value))} className="w-full border rounded p-2 text-sm" placeholder="Mtl. PKV-Beitrag" />}
+              {kvStatus === 'pkv' && <input type="number" value={pkvPremium} onChange={e => setPkvPremium(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm" placeholder="Mtl. PKV-Beitrag" />}
             </div>
             
             <div className="flex flex-col gap-2">
@@ -1003,7 +1016,7 @@ export default function App() {
                             <h4 className="text-[10px] font-bold text-blue-800 uppercase mb-2">Schnell-Schätzer (Karriere-Kurve)</h4>
                             <div className="mb-3">
                                 <label className="block text-[10px] font-semibold text-slate-600 mb-1">Heutiges Bruttojahresgehalt (€)</label>
-                                <input type="number" value={estimatorSalary} onChange={e => setEstimatorSalary(Number(e.target.value))} className="w-full border border-blue-200 rounded p-2 text-sm bg-white font-mono font-bold" />
+                                <input type="number" value={estimatorSalary} onChange={e => setEstimatorSalary(parseNum(e.target.value))} className="w-full border border-blue-200 rounded p-2 text-sm bg-white font-mono font-bold" />
                             </div>
                             <button onClick={() => {
                                 if (personTab === 'A') setGrvGrossA(estimatedPension);
@@ -1019,8 +1032,8 @@ export default function App() {
                     )}
 
                     <div className="grid grid-cols-2 gap-4">
-                      <div><label className="block text-xs font-semibold text-slate-600 mb-1">Anspruch (€/M)</label><input type="number" value={personTab==='A'?grvGrossA:grvGrossB} onChange={e => personTab==='A'?setGrvGrossA(Number(e.target.value)):setGrvGrossB(Number(e.target.value))} className="w-full border rounded p-2" /></div>
-                      <div><label className="block text-xs font-semibold text-slate-600 mb-1">Dynamik (%)</label><input type="number" step="0.1" value={grvIncreaseRate} onChange={e => setGrvIncreaseRate(Number(e.target.value))} className="w-full border rounded p-2" /></div>
+                      <div><label className="block text-xs font-semibold text-slate-600 mb-1">Anspruch (€/M)</label><input type="number" value={personTab==='A'?grvGrossA:grvGrossB} onChange={e => personTab==='A'?setGrvGrossA(parseNum(e.target.value)):setGrvGrossB(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
+                      <div><label className="block text-xs font-semibold text-slate-600 mb-1">Dynamik (%)</label><input type="number" step="0.1" value={grvIncreaseRate} onChange={e => setGrvIncreaseRate(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
                     </div>
                     {((personTab==='A' ? calculations.grvDiscountA : calculations.grvDiscountB) > 0) && (
                        <div className="mt-3 text-[10px] text-rose-600 bg-rose-50 p-2 rounded flex gap-1.5 border border-rose-100">
@@ -1055,7 +1068,7 @@ export default function App() {
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                            <label className="text-[10px] font-semibold text-slate-600 mb-1 block">Start-Kapital (Manuell)</label>
-                           <input type="number" value={planerCapital} onChange={e => setPlanerCapital(Number(e.target.value))} className="w-full border rounded p-2 text-sm font-semibold" />
+                           <input type="number" value={planerCapital} onChange={e => setPlanerCapital(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm font-semibold" />
                         </div>
                         <div className="bg-indigo-50/50 p-2 rounded-lg border border-indigo-100 flex flex-col justify-center">
                            <label className="text-[9px] font-bold uppercase text-indigo-800 mb-0.5">Zusammengefasstes Kapital</label>
@@ -1064,9 +1077,9 @@ export default function App() {
                         </div>
                       </div>
                       <div className="grid grid-cols-3 gap-3 pt-1">
-                        <div><label className="text-[10px] font-semibold text-slate-600 mb-1 block">Dauer (Jahre)</label><input type="number" value={planerDuration} onChange={e => setPlanerDuration(Number(e.target.value))} className="w-full border rounded p-2 text-sm font-medium" /></div>
-                        <div><label className="text-[10px] font-semibold text-slate-600 mb-1 block">Rendite p.a. (%)</label><input type="number" step="0.1" value={planerReturn} onChange={e => setPlanerReturn(Number(e.target.value))} className="w-full border rounded p-2 text-sm font-medium" /></div>
-                        <div><label className="text-[10px] font-semibold text-slate-600 mb-1 block">Dyn. p.a. (%)</label><input type="number" step="0.1" value={planerDynamic} onChange={e => setPlanerDynamic(Number(e.target.value))} className="w-full border rounded p-2 text-sm font-medium" /></div>
+                        <div><label className="text-[10px] font-semibold text-slate-600 mb-1 block">Dauer (Jahre)</label><input type="number" value={planerDuration} onChange={e => setPlanerDuration(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm font-medium" /></div>
+                        <div><label className="text-[10px] font-semibold text-slate-600 mb-1 block">Rendite p.a. (%)</label><input type="number" step="0.1" value={planerReturn} onChange={e => setPlanerReturn(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm font-medium" /></div>
+                        <div><label className="text-[10px] font-semibold text-slate-600 mb-1 block">Dyn. p.a. (%)</label><input type="number" step="0.1" value={planerDynamic} onChange={e => setPlanerDynamic(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm font-medium" /></div>
                       </div>
                       <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200 flex justify-between items-center mt-2 shadow-inner">
                          <label className="flex items-center gap-2 text-[10px] font-bold text-emerald-900 cursor-pointer"><input type="checkbox" checked={includePlanerInNet} onChange={e=>setIncludePlanerInNet(e.target.checked)} className="rounded text-emerald-600" /> Mtl. Entnahme ins Netto</label>
@@ -1364,6 +1377,58 @@ export default function App() {
           <div className="flex flex-col text-right"><span className="text-[10px] text-slate-400 uppercase font-bold">Lücke</span><span className={`text-sm sm:text-lg font-bold ${calculations.gap > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>{calculations.gap > 0 ? formatResultCurrency(calculations.gap) : 'Gedeckt!'}</span></div>
         </div>
       </div>
+
+      {/* PRINT ONLY: STEUER- & ABGABEN-EXKURS */}
+      {printExplanationMode !== 'none' && (
+        <div className="hidden print:block max-w-6xl mx-auto p-6 mt-8 break-before-page text-slate-800">
+          <h2 className="text-2xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-6 text-indigo-900">Exkurs: Steuerliche & Rechtliche Grundlagen</h2>
+
+          {printExplanationMode === 'short' ? (
+             <div className="space-y-6 text-sm leading-relaxed">
+                <div>
+                   <h3 className="font-bold text-lg mb-1 text-slate-900">1. Schicht 1 (Gesetzliche Rente & Basisrente)</h3>
+                   <p>Diese Schicht unterliegt der <strong>nachgelagerten Kohortenbesteuerung</strong>. Der steuerpflichtige Anteil richtet sich nach dem Jahr Ihres Renteneintritts (z. B. 84 % im Jahr 2026). Die verbleibenden steuerfreien 16 % werden im ersten Rentenjahr als absoluter Euro-Betrag auf Lebenszeit eingefroren. Alle künftigen Rentenerhöhungen (Inflationsausgleich) sind somit zu 100 % steuerpflichtig. In der KVdR fallen hierauf Beiträge zur Kranken- und Pflegeversicherung an.</p>
+                </div>
+                <div>
+                   <h3 className="font-bold text-lg mb-1 text-slate-900">2. Schicht 2 (Betriebliche Altersvorsorge & Riester)</h3>
+                   <p>Betriebs- und Riester-Renten sind in der Auszahlungsphase <strong>voll einkommensteuerpflichtig</strong>. Bei Betriebsrenten (bAV) aus einer Entgeltumwandlung müssen gesetzlich Versicherte in der Auszahlungsphase zudem die <strong>vollen Beiträge zur Kranken- und Pflegeversicherung</strong> (Arbeitnehmer- und Arbeitgeberanteil) abführen. Dies mindert die reale Rendite von Verträgen ohne hohen Arbeitgeberzuschuss oft spürbar.</p>
+                </div>
+                <div>
+                   <h3 className="font-bold text-lg mb-1 text-slate-900">3. Schicht 3 (Private Renten, Immobilien & ETFs)</h3>
+                   <p>Diese Verträge sind im Alter steuerlich stark begünstigt. Bei einer lebenslangen privaten Rente greift die <strong>Ertragsanteilsbesteuerung</strong> (bei Renteneintritt mit 67 Jahren sind nur 17 % der Rente steuerpflichtig). Depotentnahmen unterliegen der Abgeltungsteuer (25 % zzgl. Soli), wobei Aktien-ETFs eine <strong>Teilfreistellung von 30 %</strong> (komplett steuerfrei) genießen. Zudem sind Auszahlungen aus der Schicht 3 für Pflichtversicherte in der KVdR komplett kranken- und pflegeversicherungsfrei.</p>
+                </div>
+             </div>
+          ) : (
+             <div className="space-y-6 text-sm leading-relaxed">
+                <p className="font-semibold text-slate-600 mb-6">Dieses Gutachten basiert auf der aktuellen Steuer- und Sozialgesetzgebung der Bundesrepublik Deutschland. Die nachfolgenden Erläuterungen legen die methodischen und rechtlichen Berechnungsgrundlagen dieses Dokuments offen.</p>
+
+                <div className="grid grid-cols-2 gap-8">
+                    <div>
+                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">Krankenversicherung der Rentner (KVdR)</h3>
+                       <p className="mb-4">Die KVdR ist keine eigenständige Kasse, sondern ein begehrter Versichertenstatus. Erreicht wird er über die "9/10-Regelung" (mind. 90 % der zweiten Erwerbslebenshälfte gesetzlich versichert). Der gravierende Vorteil: KVdR-Mitglieder zahlen KV/PV-Beiträge <strong>nur auf gesetzliche Renten und Betriebsrenten</strong>. Einkünfte aus Kapitalvermögen (ETFs, private Renten) oder Vermietung bleiben zu 100 % beitragsfrei.</p>
+
+                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1 mt-6">Kohortenbesteuerung (Schicht 1)</h3>
+                       <p className="mb-4">Gemäß Alterseinkünftegesetz steigt die Steuerpflicht für gesetzliche Renten und Rürup-Renten sukzessive an. Wer 2026 in Rente geht, muss 84 % seiner ersten vollen Jahresrente versteuern. Die restlichen 16 % werden als <strong>absoluter Euro-Betrag auf Lebenszeit eingefroren</strong>. Die Konsequenz: Jede zukünftige gesetzliche Rentenerhöhung erhöht das zu versteuernde Einkommen unmittelbar zu 100 %.</p>
+                    </div>
+
+                    <div>
+                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">Betriebsrenten & Doppelverbeitragung</h3>
+                       <p className="mb-4">Die betriebliche Altersvorsorge (bAV) mindert in der Erwerbsphase Steuern und Sozialabgaben. Im Alter dreht sich dies um: bAV-Renten sind voll steuerpflichtig. Gravierender ist die Sozialversicherungspflicht: Rentner müssen hierauf den <strong>vollen Kranken- und Pflegeversicherungsbeitrag (ca. 19 - 20 %)</strong> abführen (abzgl. eines kleinen Freibetrags). Dies ist die sogenannte Doppelverbeitragung.</p>
+
+                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1 mt-6">Steuerprivilegien in Schicht 3</h3>
+                       <p className="mb-2"><strong>Private Leibrenten:</strong> Unterliegen nur der Ertragsanteilsbesteuerung nach § 22 EStG. Geht man mit 67 in Rente, rechnet das Finanzamt fiktiv nur 17 % der Rente als steuerpflichtiges Einkommen an.</p>
+                       <p className="mb-2"><strong>Kapitalauszahlungen:</strong> Bei Laufzeiten über 12 Jahren und Auszahlung ab Alter 62 greift das <strong>Halbeinkünfteverfahren</strong>. 50 % des Gewinns sind steuerfrei, die andere Hälfte unterliegt dem persönlichen Steuersatz.</p>
+                       <p><strong>ETF-Depots:</strong> Realisierte Kursgewinne unterliegen der Abgeltungsteuer (25 % + Soli). Bei reinen Aktien-ETFs bleiben durch das Investmentsteuergesetz (Teilfreistellung) <strong>30 % aller Gewinne komplett steuerfrei</strong>.</p>
+                    </div>
+                </div>
+                <div className="mt-8 text-[10px] text-slate-400 text-center border-t border-slate-200 pt-4 font-semibold uppercase tracking-wider">
+                    Hinweis: Alle Berechnungen in diesem Dokument sind softwaregestützte Simulationen und ersetzen keine rechtsverbindliche Steuerberatung.
+                </div>
+             </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }
