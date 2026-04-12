@@ -119,7 +119,8 @@ export default function App() {
   const [hoveredData, setHoveredData] = useState(null); 
   const [showTaxInfo, setShowTaxInfo] = useState(false); 
   const [showBenchmark, setShowBenchmark] = useState(false);
-  const [printExplanationMode, setPrintExplanationMode] = useState('short'); // NEU: Auswahl für PDF-Exkurs
+  const [printExplanationMode, setPrintExplanationMode] = useState('short'); 
+  const [manualChartStart, setManualChartStart] = useState(null); // NEU: Für den Chart-Slider
 
   // --- RENTEN-SCHÄTZER STATES & LOGIK ---
   const [estimatorPerson, setEstimatorPerson] = useState(null);
@@ -681,34 +682,53 @@ export default function App() {
     
     const lumpSumRequired = requiredCapital > 0 ? requiredCapital / Math.pow(1 + (solutionSavingsReturn/100), maxYearsToRet) : 0;
 
-    let etfSims = finalizedContracts
-      .filter(c => c.type === 'etf' && (c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')) === 'rent')
-      .map(c => ({ cap: c.totalCap, returnWithRate: Math.max(0, (c.returnWith || 0) - (c.ter || 0)), with: c.grossMonthly * 12 }));
-      
-    const chartData = [];
-    let curPlanerChart = Math.max(0, effectivePlanerCapital), curPlanerWithChart = finalPlanerWithdrawalGross * 12;
+    // --- INCOME CHART DATA (Bar Chart) ---
+    const incomeChartData = [];
+    const startYearChart = currentYear; // Startet immer im aktuellen Jahr
+    const endYearChart = currentYear + Math.max(50, 105 - Math.floor(currentAgeA)); // Berechnet bis Alter 105
     
-    const startAgeChart = Math.floor(Math.min(retirementAgeA, isMarried ? retirementAgeB : retirementAgeA));
-    for (let age = startAgeChart; age <= 100; age++) {
-      let currentEtfTotal = etfSims.reduce((sum, sim) => sum + Math.max(0, sim.cap), 0);
-      chartData.push({ age, etf: currentEtfTotal, planer: Math.max(0, curPlanerChart), discount: Math.pow(1 + inflationRate / 100, age - (isMarried ? Math.min(currentAgeA, currentAgeB) : currentAgeA)) });
-      etfSims.forEach(sim => { 
-          if (sim.cap > 0) { 
-              sim.cap = sim.cap * (1 + sim.returnWithRate / 100) - sim.with; 
-              if (sim.cap < 0) sim.cap = 0;
-          } 
-      });
-      if (curPlanerChart > 0) {
-          curPlanerChart = curPlanerChart * (1 + planerReturn / 100) - curPlanerWithChart;
-          if (curPlanerChart < 0) curPlanerChart = 0;
+    const etfNets = finalizedContracts.filter(c => c.type === 'etf' && (c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')) === 'rent');
+
+    for (let y = startYearChart; y <= endYearChart; y++) {
+      const yearsFromNow = Math.max(0, y - currentYear);
+      const ageA_in_y = Math.floor(currentAgeA + yearsFromNow);
+      const discount = Math.pow(1 + inflationRate / 100, yearsFromNow);
+      const target = targetIncomeToday * Math.pow(1 + inflationRate / 100, yearsFromNow);
+
+      if (y < baseRetYear) {
+        const netSalary = currentNetIncome * Math.pow(1 + wageGrowthRate / 100, yearsFromNow);
+        incomeChartData.push({
+          age: ageA_in_y, year: y, isRetirement: false,
+          totalNet: netSalary, target, discount, planer: 0
+        });
+      } else {
+        const yearsInRet = y - baseRetYear;
+        const s1_net_chart = grvNet * Math.pow(1 + grvIncreaseRate / 100, yearsInRet) + (s1_net - grvNet);
+        const s2_net_chart = s2_net;
+        
+        let s3_net_chart = s3_net - (includePlanerInNet ? finalPlanerWithdrawalNet : 0);
+        etfNets.forEach(c => {
+            const dur = c.duration !== undefined ? c.duration : 25;
+            if (yearsInRet >= dur) s3_net_chart -= c.net;
+        });
+
+        let currentPlanerNet = 0;
+        if (includePlanerInNet && yearsInRet < planerDuration) {
+          currentPlanerNet = finalPlanerWithdrawalNet * Math.pow(1 + planerDynamic / 100, yearsInRet);
+        }
+
+        const totalNet = s1_net_chart + s2_net_chart + s3_net_chart + currentPlanerNet;
+        incomeChartData.push({
+          age: ageA_in_y, year: y, isRetirement: true,
+          totalNet, target, discount, planer: currentPlanerNet
+        });
       }
-      curPlanerWithChart *= (1 + planerDynamic / 100);
     }
 
     return {
       currentAgeA, currentAgeB, retirementAgeA, retirementAgeB,
       yearsToRetA, yearsToRetB, maxYearsToRet, targetIncomeFuture, baseRetYear,
-      inflationFactor, chartData, zvE_yearly: zvE_yearly_nominal, avgTaxRate, marginalTaxRate: marginalTaxToday, deductible_kvpv, 
+      inflationFactor, incomeChartData, zvE_yearly: zvE_yearly_nominal, avgTaxRate, marginalTaxRate: marginalTaxToday, deductible_kvpv, 
       grvFutureGrossTotal, grvNet, grvKvpv, grvESt, grvKist, s1_net, s2_net, s3_net, contracts: finalizedContracts,
       totalNetFuture: s1_net + s2_net + s3_net, gap, requiredCapital, requiredSavings, lumpSumRequired,
       grvDiscountA: getGrvAbschlag(retirementAgeA), grvDiscountB: getGrvAbschlag(retirementAgeB), projectedFinalNet,
@@ -728,33 +748,36 @@ export default function App() {
   const formatYAxis = (val) => val >= 1000000 ? (val / 1000000).toFixed(1).replace('.0', '') + ' Mio.' : val >= 1000 ? (val / 1000).toFixed(0) + 'k' : val.toString();
   const renderBonVal = (val) => (<><span className="print:hidden">{formatResultCurrency(val)}</span><span className="hidden print:inline">{formatCurrency(val)} <span className="text-slate-500 font-normal">({formatCurrency(val / calculations.inflationFactor)} real)</span></span></>);
 
-  const svgWidth = 800, svgHeight = 300, paddingX = 40, paddingY = 20, bottomPadding = 30, graphHeight = svgHeight - paddingY - bottomPadding;
+  // --- CHART VIEW LOGIC (Sliding Window) ---
+  const chartWindowSize = 30; // 30 Jahre gleichzeitig sichtbar
+  const defaultStartAge = Math.max(Math.floor(calculations.currentAgeA), Math.floor(calculations.retirementAgeA) - 3);
+  const activeStartAge = manualChartStart !== null ? manualChartStart : defaultStartAge;
+  const visibleChartData = calculations.incomeChartData.filter(d => d.age >= activeStartAge && d.age <= activeStartAge + chartWindowSize);
+
+  // ACHTUNG: paddingX von 40 auf 55 erhöht, damit die großen fetten Zahlen Platz haben
+  const svgWidth = 800, svgHeight = 300, paddingX = 55, paddingY = 20, bottomPadding = 30, graphHeight = svgHeight - paddingY - bottomPadding;
   
-  // FIX: Prevent NaN from breaking the SVG rendering by applying fallback limits
-  const maxDataVal = calculations.chartData.length > 0 ? Math.max(...calculations.chartData.map(d => {
-    const etfVal = showRealValue ? (d.etf / (d.discount || 1)) : d.etf;
-    const planerVal = showRealValue ? (d.planer / (d.discount || 1)) : d.planer;
-    return Math.max(isNaN(etfVal) ? 0 : etfVal, isNaN(planerVal) ? 0 : planerVal);
+  const maxDataVal = visibleChartData.length > 0 ? Math.max(...visibleChartData.map(d => {
+    const val = showRealValue ? (d.totalNet / (d.discount || 1)) : d.totalNet;
+    const tgt = showRealValue ? (d.target / (d.discount || 1)) : d.target;
+    return Math.max(isNaN(val) ? 0 : val, isNaN(tgt) ? 0 : tgt);
   })) : 0;
   
-  const maxY = Math.max(100, (isNaN(maxDataVal) ? 100 : maxDataVal) * 1.1); 
+  const maxY = Math.max(1000, (isNaN(maxDataVal) ? 1000 : maxDataVal) * 1.15); 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map(mult => maxY * mult); 
-  const getX = (index) => paddingX + (index / (Math.max(1, calculations.chartData.length - 1))) * (svgWidth - paddingX * 2);
+  const stepX = (svgWidth - paddingX * 2) / Math.max(1, visibleChartData.length);
+  const barWidth = stepX * 0.7;
   const getY = (val) => svgHeight - bottomPadding - (val / maxY) * graphHeight;
   
-  const etfPath = calculations.chartData.map((d, i) => {
-    const val = showRealValue ? (d.etf / (d.discount || 1)) : d.etf;
-    return `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(isNaN(val) ? 0 : val)}`;
-  }).join(" ");
-  
-  const planerPath = calculations.chartData.map((d, i) => {
-    const val = showRealValue ? (d.planer / (d.discount || 1)) : d.planer;
-    return `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(isNaN(val) ? 0 : val)}`;
+  const targetPath = visibleChartData.map((d, i) => {
+    const cx = paddingX + i * stepX + stepX / 2;
+    const tgt = showRealValue ? (d.target / (d.discount || 1)) : d.target;
+    return `${i === 0 ? 'M' : 'L'} ${cx} ${getY(isNaN(tgt) ? 0 : tgt)}`;
   }).join(" ");
 
   const renderContractInput = (c) => (
-    <div key={c.id} className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm relative group mb-3">
-      <button onClick={() => removeContract(c.id)} className="absolute top-3 right-3 text-slate-300 hover:text-rose-500"><Trash className="w-4 h-4" /></button>
+    <div key={c.id} className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm relative group mb-3 print:border-slate-300 print:shadow-none">
+      <button onClick={() => removeContract(c.id)} className="absolute top-3 right-3 text-slate-300 hover:text-rose-500 print:hidden"><Trash className="w-4 h-4" /></button>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3 pr-6">
         <div>
           <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Vertragsart</label>
@@ -793,11 +816,11 @@ export default function App() {
             <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Kapital heute (€)</label><input type="number" value={c.capital ?? ''} onChange={e => updateContract(c.id, 'capital', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
             <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Sparrate (€/M)</label><input type="number" value={c.monthly ?? ''} onChange={e => updateContract(c.id, 'monthly', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
           </div>
-          <div className="bg-blue-50/50 p-2 rounded-lg border border-blue-100">
+          <div className="bg-blue-50/50 p-2 rounded-lg border border-blue-100 print:bg-white print:border-slate-200">
              <label className="block text-[10px] font-bold text-blue-800 mb-2 flex items-center gap-1"><Zap className="w-3 h-3"/> Geplante Sonderzahlung / Einmalanlage</label>
              <div className="grid grid-cols-2 gap-3">
-               <div><label className="block text-[9px] text-slate-500 mb-1">Summe (€)</label><input type="number" value={c.specialPayment ?? ''} onChange={e => updateContract(c.id, 'specialPayment', parseNum(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs" placeholder="z.B. Erbe"/></div>
-               <div><label className="block text-[9px] text-slate-500 mb-1">Im Jahr</label><input type="number" value={c.specialPaymentYear ?? ''} onChange={e => updateContract(c.id, 'specialPaymentYear', parseNum(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs" /></div>
+               <div><label className="block text-[9px] text-slate-500 mb-1">Summe (€)</label><input type="number" value={c.specialPayment ?? ''} onChange={e => updateContract(c.id, 'specialPayment', parseNum(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs print:border-slate-300" placeholder="z.B. Erbe"/></div>
+               <div><label className="block text-[9px] text-slate-500 mb-1">Im Jahr</label><input type="number" value={c.specialPaymentYear ?? ''} onChange={e => updateContract(c.id, 'specialPaymentYear', parseNum(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs print:border-slate-300" /></div>
              </div>
           </div>
           <div className="grid grid-cols-4 gap-2">
@@ -905,48 +928,54 @@ export default function App() {
       <main className="max-w-6xl mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 print:p-0 print:block">
         
         {/* LEFT COLUMN: INPUTS */}
-        <div className="lg:col-span-6 xl:col-span-5 space-y-6 print:hidden">
+        <div className="lg:col-span-6 xl:col-span-5 space-y-6">
           
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-            <h2 className="text-sm font-bold mb-4 text-slate-700 border-b border-slate-100 pb-2">Allgemeine Daten & Ziel</h2>
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 print:shadow-none print:border-none print:p-0">
+            <h2 className="text-sm font-bold mb-4 text-slate-700 border-b border-slate-100 pb-2 print:text-lg print:text-indigo-900 print:border-indigo-200">Allgemeine Daten & Ziel</h2>
             
             {isMarried && (
-              <div className="flex bg-slate-100 p-1 rounded-lg mb-4">
+              <div className="flex bg-slate-100 p-1 rounded-lg mb-4 print:hidden">
                  <button onClick={()=>setPersonTab('A')} className={`flex-1 py-1.5 text-xs font-bold rounded ${personTab==='A' ? 'bg-white shadow text-indigo-700':'text-slate-500'}`}>Person A</button>
                  <button onClick={()=>setPersonTab('B')} className={`flex-1 py-1.5 text-xs font-bold rounded ${personTab==='B' ? 'bg-white shadow text-indigo-700':'text-slate-500'}`}>Person B</button>
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4 mb-2">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Geburtsdatum ({personTab})</label>
-                <input type="text" placeholder="TT.MM.JJJJ" value={personTab === 'A' ? birthDateA : birthDateB} onChange={e => handleBirthDateChange(e.target.value, personTab)} className="w-full border rounded p-2 text-sm" />
+            {/* PERSON DATA MAPPING (For handling Print view perfectly) */}
+            {['A', 'B'].filter(p => p === 'A' || isMarried).map(p => (
+              <div key={`person-data-${p}`} className={`${personTab === p ? 'block' : 'hidden'} print:block mb-4`}>
+                <h3 className="hidden print:block text-sm font-bold text-slate-700 mb-2 border-b border-slate-100 pb-1">Daten Person {p}</h3>
+                <div className="grid grid-cols-2 gap-4 mb-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Geburtsdatum {isMarried ? `(Person ${p})` : ''}</label>
+                    <input type="text" placeholder="TT.MM.JJJJ" value={p === 'A' ? birthDateA : birthDateB} onChange={e => handleBirthDateChange(e.target.value, p)} className="w-full border rounded p-2 text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Rentenbeginn {isMarried ? `(Person ${p})` : ''}</label>
+                    <input type="text" placeholder="TT.MM.JJJJ" value={p === 'A' ? retDateA : retDateB} onChange={e => handleRetDateChange(e.target.value, p)} className="w-full border rounded p-2 text-sm" />
+                  </div>
+                </div>
+                
+                <div className="text-[10px] text-slate-500 mb-4 bg-slate-50 border border-slate-100 p-2 rounded flex justify-between">
+                  <span>Alter heute: <strong className="text-slate-700">{(p === 'A' ? calculations.currentAgeA : calculations.currentAgeB).toFixed(1)} J.</strong></span>
+                  <span>Eintrittsalter: <strong className="text-slate-700">{(p === 'A' ? calculations.retirementAgeA : calculations.retirementAgeB).toFixed(1)} J.</strong></span>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Rentenbeginn ({personTab})</label>
-                <input type="text" placeholder="TT.MM.JJJJ" value={personTab === 'A' ? retDateA : retDateB} onChange={e => handleRetDateChange(e.target.value, personTab)} className="w-full border rounded p-2 text-sm" />
-              </div>
-            </div>
+            ))}
             
-            <div className="text-[10px] text-slate-500 mb-4 bg-slate-50 border border-slate-100 p-2 rounded flex justify-between">
-              <span>Alter heute: <strong className="text-slate-700">{(personTab === 'A' ? calculations.currentAgeA : calculations.currentAgeB).toFixed(1)} J.</strong></span>
-              <span>Eintrittsalter: <strong className="text-slate-700">{(personTab === 'A' ? calculations.retirementAgeA : calculations.retirementAgeB).toFixed(1)} J.</strong></span>
-            </div>
-            
-            <div className="mb-6 p-4 bg-indigo-50/70 rounded-xl border-2 border-indigo-100 shadow-sm">
+            <div className="mb-6 p-4 bg-indigo-50/70 rounded-xl border-2 border-indigo-100 shadow-sm print:bg-indigo-50 print:border-indigo-200">
               <div className="flex justify-between items-center mb-2">
                  <label className="block text-sm font-bold text-indigo-900">Zielnetto im Alter (Kaufkraft heute)</label>
               </div>
               <input type="number" value={targetIncomeToday} onChange={e => setTargetIncomeToday(parseNum(e.target.value))} className="w-full border-2 border-indigo-200 bg-white rounded-lg p-3 text-xl font-black text-indigo-900 mb-3 shadow-inner outline-none focus:border-indigo-400 transition-colors" />
               
               <div className="border-t-2 border-indigo-200/60 pt-3 mt-3">
-                 <button onClick={() => setShowBenchmark(!showBenchmark)} className="w-full flex justify-between items-center text-xs font-extrabold text-indigo-800 uppercase tracking-wide hover:opacity-80 transition-opacity">
+                 <button onClick={() => setShowBenchmark(!showBenchmark)} className="w-full flex justify-between items-center text-xs font-extrabold text-indigo-800 uppercase tracking-wide hover:opacity-80 transition-opacity print:hidden">
                    <span className="flex items-center gap-1.5"><TrendingUp className="w-4 h-4 text-indigo-600"/> Benchmark: Gehalts-Prognose</span>
                    {showBenchmark ? <ChevronUp className="w-4 h-4 text-indigo-400"/> : <ChevronDown className="w-4 h-4 text-indigo-400"/>}
                  </button>
 
                  {showBenchmark && (
-                     <div className="mt-5">
+                     <div className="mt-5 print:mt-0">
                          <div className="grid grid-cols-2 gap-4 mb-5">
                            <div>
                              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Heutiges Netto (€/M)</label>
@@ -959,7 +988,7 @@ export default function App() {
                          </div>
                          
                          <div className="bg-white p-5 rounded-xl shadow-sm border border-indigo-100 text-center relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-400 to-indigo-600"></div>
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-400 to-indigo-600 print:hidden"></div>
                             
                             <p className="text-sm text-slate-600 mb-2">Ihr Gehalt steigt bis zur Rente voraussichtlich auf:</p>
                             <div className="text-2xl font-bold text-slate-800 mb-4">{formatCurrency(calculations.projectedFinalNet)}</div>
@@ -988,81 +1017,95 @@ export default function App() {
               {kvStatus === 'pkv' && <input type="number" value={pkvPremium} onChange={e => setPkvPremium(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm" placeholder="Mtl. PKV-Beitrag" />}
             </div>
             
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2 print:mb-6">
               <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={hasChildren} onChange={e => setHasChildren(e.target.checked)} className="rounded" /> Kinder vorhanden (PV-Zuschlag entfällt)</label>
               <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={hasChurchTax} onChange={e => setHasChurchTax(e.target.checked)} className="rounded" /> Kirchensteuer (8 %)</label>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="flex border-b border-slate-200 bg-slate-50">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print:border-none print:shadow-none">
+            <div className="flex border-b border-slate-200 bg-slate-50 print:hidden">
               {['s1', 's2', 's3', 'planer'].map(t => (
                 <button key={t} className={`flex-1 py-3 text-[10px] sm:text-xs font-bold uppercase ${activeTab === t ? 'bg-white text-indigo-700 border-b-2 border-indigo-700' : 'text-slate-500'}`} onClick={() => setActiveTab(t)}>{t === 's1' ? 'Schicht 1' : t === 's2' ? 'Schicht 2' : t === 's3' ? 'Schicht 3' : 'Planer'}</button>
               ))}
             </div>
-            <div className="p-4 bg-slate-50/50 min-h-[400px]">
-              {activeTab === 's1' && (
+            <div className="p-4 bg-slate-50/50 min-h-[400px] print:min-h-0 print:p-0 print:bg-transparent">
+              
+              {/* SCHICHT 1 (GRV & Basisrente) */}
+              <div className={`${activeTab === 's1' ? 'block' : 'hidden'} print:block print:mb-8`}>
+                <h3 className="hidden print:block font-bold text-blue-900 mb-4 border-b border-blue-200 pb-1 text-lg">Eingaben: Schicht 1 (Basis)</h3>
                 <div className="space-y-4">
-                  <div className="bg-white p-4 rounded-lg border border-blue-200 shadow-sm relative">
-                    <h3 className="text-sm font-bold text-blue-800 mb-3 flex items-center justify-between">
-                      <span className="flex items-center gap-2"><ShieldAlert className="w-4 h-4" /> Gesetzliche Rente ({personTab})</span>
-                      <button onClick={() => estimatorPerson === personTab ? setEstimatorPerson(null) : openEstimator(personTab)} className="text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 flex items-center gap-1 transition-colors">
-                        <Calculator className="w-3 h-3"/> {estimatorPerson === personTab ? 'Schließen' : 'Schätzen'}
-                      </button>
-                    </h3>
+                  
+                  {/* GRV MAPPING */}
+                  {['A', 'B'].filter(p => p === 'A' || isMarried).map(p => (
+                    <div key={`grv-${p}`} className={`${personTab === p ? 'block' : 'hidden'} print:block print:mb-4 bg-white p-4 rounded-lg border border-blue-200 shadow-sm relative print:border-slate-300 print:shadow-none`}>
+                      <h3 className="text-sm font-bold text-blue-800 mb-3 flex items-center justify-between print:text-slate-800">
+                        <span className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 print:text-slate-500" /> Gesetzliche Rente {isMarried ? `(Person ${p})` : ''}</span>
+                        <button onClick={() => estimatorPerson === p ? setEstimatorPerson(null) : openEstimator(p)} className="print:hidden text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 flex items-center gap-1 transition-colors">
+                          <Calculator className="w-3 h-3"/> {estimatorPerson === p ? 'Schließen' : 'Schätzen'}
+                        </button>
+                      </h3>
 
-                    {estimatorPerson === personTab && (
-                        <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100 shadow-inner">
-                            <h4 className="text-[10px] font-bold text-blue-800 uppercase mb-2">Schnell-Schätzer (Karriere-Kurve)</h4>
-                            <div className="mb-3">
-                                <label className="block text-[10px] font-semibold text-slate-600 mb-1">Heutiges Bruttojahresgehalt (€)</label>
-                                <input type="number" value={estimatorSalary} onChange={e => setEstimatorSalary(parseNum(e.target.value))} className="w-full border border-blue-200 rounded p-2 text-sm bg-white font-mono font-bold" />
-                            </div>
-                            <button onClick={() => {
-                                if (personTab === 'A') setGrvGrossA(estimatedPension);
-                                else setGrvGrossB(estimatedPension);
-                                setEstimatorPerson(null);
-                            }} className="w-full bg-blue-600 text-white text-xs font-bold py-2 rounded hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                                <CheckCircle className="w-3.5 h-3.5" /> ca. {estimatedPension} € übernehmen
-                            </button>
-                            <p className="text-[9px] text-blue-600/70 mt-2 text-center leading-tight">
-                                <strong>Logik:</strong> Simuliert exakt {Math.max(0, Math.floor(personTab === 'A' ? calculations.retirementAgeA : calculations.retirementAgeB) - 22)} Arbeitsjahre. Geht davon aus, dass das Gehalt seit dem Alter von 22 Jahren bis heute ({Math.floor(personTab === 'A' ? calculations.currentAgeA : calculations.currentAgeB)} J.) kontinuierlich bis auf den eingegebenen Wert gestiegen ist. (Werte 2026).
-                            </p>
-                        </div>
-                    )}
+                      {estimatorPerson === p && (
+                          <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100 shadow-inner print:hidden">
+                              <h4 className="text-[10px] font-bold text-blue-800 uppercase mb-2">Schnell-Schätzer (Karriere-Kurve)</h4>
+                              <div className="mb-3">
+                                  <label className="block text-[10px] font-semibold text-slate-600 mb-1">Heutiges Bruttojahresgehalt (€)</label>
+                                  <input type="number" value={estimatorSalary} onChange={e => setEstimatorSalary(parseNum(e.target.value))} className="w-full border border-blue-200 rounded p-2 text-sm bg-white font-mono font-bold" />
+                              </div>
+                              <button onClick={() => {
+                                  if (p === 'A') setGrvGrossA(estimatedPension);
+                                  else setGrvGrossB(estimatedPension);
+                                  setEstimatorPerson(null);
+                              }} className="w-full bg-blue-600 text-white text-xs font-bold py-2 rounded hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                                  <CheckCircle className="w-3.5 h-3.5" /> ca. {estimatedPension} € übernehmen
+                              </button>
+                          </div>
+                      )}
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div><label className="block text-xs font-semibold text-slate-600 mb-1">Anspruch (€/M)</label><input type="number" value={personTab==='A'?grvGrossA:grvGrossB} onChange={e => personTab==='A'?setGrvGrossA(parseNum(e.target.value)):setGrvGrossB(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
-                      <div><label className="block text-xs font-semibold text-slate-600 mb-1">Dynamik (%)</label><input type="number" step="0.1" value={grvIncreaseRate} onChange={e => setGrvIncreaseRate(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div><label className="block text-xs font-semibold text-slate-600 mb-1">Anspruch (€/M)</label><input type="number" value={p==='A'?grvGrossA:grvGrossB} onChange={e => p==='A'?setGrvGrossA(parseNum(e.target.value)):setGrvGrossB(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
+                        <div><label className="block text-xs font-semibold text-slate-600 mb-1">Dynamik (%)</label><input type="number" step="0.1" value={grvIncreaseRate} onChange={e => setGrvIncreaseRate(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
+                      </div>
+                      {((p==='A' ? calculations.grvDiscountA : calculations.grvDiscountB) > 0) && (
+                         <div className="mt-3 text-[10px] text-rose-600 bg-rose-50 p-2 rounded flex gap-1.5 border border-rose-100">
+                           <AlertCircle className="w-3 h-3 shrink-0" />
+                           <span>Vorruhestand: Es werden automatisch {((p==='A' ? calculations.grvDiscountA : calculations.grvDiscountB)*100).toFixed(1)}% Abschlag berechnet.</span>
+                         </div>
+                      )}
                     </div>
-                    {((personTab==='A' ? calculations.grvDiscountA : calculations.grvDiscountB) > 0) && (
-                       <div className="mt-3 text-[10px] text-rose-600 bg-rose-50 p-2 rounded flex gap-1.5 border border-rose-100">
-                         <AlertCircle className="w-3 h-3 shrink-0" />
-                         <span>Vorruhestand: Es werden automatisch {((personTab==='A' ? calculations.grvDiscountA : calculations.grvDiscountB)*100).toFixed(1)}% Abschlag auf diese Rente berechnet.</span>
-                       </div>
-                    )}
-                  </div>
+                  ))}
+
                   {contracts.filter(c => c.layer === 1).map(renderContractInput)}
-                  <button onClick={() => addContract(1)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded text-slate-500 flex items-center justify-center gap-2 hover:border-blue-400 hover:text-blue-600"><PlusCircle className="w-4 h-4" /> Rürup hinzufügen</button>
+                  <button onClick={() => addContract(1)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded text-slate-500 flex items-center justify-center gap-2 hover:border-blue-400 hover:text-blue-600 print:hidden"><PlusCircle className="w-4 h-4" /> Rürup hinzufügen</button>
                 </div>
-              )}
-              {activeTab === 's2' && (
+              </div>
+
+              {/* SCHICHT 2 (bAV / Riester) */}
+              <div className={`${activeTab === 's2' ? 'block' : 'hidden'} print:block print:mb-8`}>
+                <h3 className={`hidden ${contracts.filter(c => c.layer === 2).length > 0 ? 'print:block' : 'print:hidden'} font-bold text-purple-900 mb-4 border-b border-purple-200 pb-1 text-lg`}>Eingaben: Schicht 2 (Zusatz)</h3>
                 <div className="space-y-4">
                   {contracts.filter(c => c.layer === 2).map(renderContractInput)}
-                  <button onClick={() => addContract(2)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded text-slate-500 flex items-center justify-center gap-2 hover:border-purple-400 hover:text-purple-600"><PlusCircle className="w-4 h-4" /> bAV / Riester hinzufügen</button>
+                  <button onClick={() => addContract(2)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded text-slate-500 flex items-center justify-center gap-2 hover:border-purple-400 hover:text-purple-600 print:hidden"><PlusCircle className="w-4 h-4" /> bAV / Riester hinzufügen</button>
                 </div>
-              )}
-              {activeTab === 's3' && (
+              </div>
+
+              {/* SCHICHT 3 (Privat) */}
+              <div className={`${activeTab === 's3' ? 'block' : 'hidden'} print:block print:mb-8`}>
+                <h3 className={`hidden ${contracts.filter(c => c.layer === 3).length > 0 ? 'print:block' : 'print:hidden'} font-bold text-emerald-900 mb-4 border-b border-emerald-200 pb-1 text-lg`}>Eingaben: Schicht 3 (Privat)</h3>
                 <div className="space-y-4">
                   {contracts.filter(c => c.layer === 3).map(renderContractInput)}
-                  <button onClick={() => addContract(3)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded text-slate-500 flex items-center justify-center gap-2 hover:border-emerald-400 hover:text-emerald-600"><PlusCircle className="w-4 h-4" /> Vertrag / Depot hinzufügen</button>
+                  <button onClick={() => addContract(3)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded text-slate-500 flex items-center justify-center gap-2 hover:border-emerald-400 hover:text-emerald-600 print:hidden"><PlusCircle className="w-4 h-4" /> Vertrag / Depot hinzufügen</button>
                 </div>
-              )}
-              {activeTab === 'planer' && (
+              </div>
+
+              {/* PLANER */}
+              <div className={`${activeTab === 'planer' ? 'block' : 'hidden'} print:block`}>
+                 <h3 className="hidden print:block font-bold text-indigo-900 mb-4 border-b border-indigo-200 pb-1 text-lg">Eingaben: Auszahlungs-Planer</h3>
                  <div className="space-y-4">
-                    <div className="bg-white p-4 rounded-lg border border-indigo-100 shadow-sm space-y-4">
-                      <div className="border-b border-indigo-50 pb-3">
-                        <label className="block text-xs font-bold text-indigo-900 mb-1 flex items-center gap-1.5"><Wallet className="w-4 h-4"/> Planer: Dynamische Verrentung</label>
+                    <div className="bg-white p-4 rounded-lg border border-indigo-100 shadow-sm space-y-4 print:border-slate-300 print:shadow-none">
+                      <div className="border-b border-indigo-50 pb-3 print:border-slate-200">
+                        <label className="block text-xs font-bold text-indigo-900 mb-1 flex items-center gap-1.5 print:text-slate-800"><Wallet className="w-4 h-4 print:text-slate-500"/> Planer: Dynamische Verrentung</label>
                         <div className="text-[10px] text-slate-500">Bündelt Ihr Start-Kapital und übertragene Verträge, um eine passgenaue Entnahme zu berechnen.</div>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
@@ -1070,10 +1113,10 @@ export default function App() {
                            <label className="text-[10px] font-semibold text-slate-600 mb-1 block">Start-Kapital (Manuell)</label>
                            <input type="number" value={planerCapital} onChange={e => setPlanerCapital(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm font-semibold" />
                         </div>
-                        <div className="bg-indigo-50/50 p-2 rounded-lg border border-indigo-100 flex flex-col justify-center">
-                           <label className="text-[9px] font-bold uppercase text-indigo-800 mb-0.5">Zusammengefasstes Kapital</label>
-                           <div className="font-black text-indigo-900 text-sm">{formatCurrency(calculations.effectivePlanerCapital)}</div>
-                           {calculations.transferredCapital > 0 && <div className="text-[9px] text-indigo-600 font-medium mt-0.5">inkl. {formatCurrency(calculations.transferredCapital)} aus Verträgen</div>}
+                        <div className="bg-indigo-50/50 p-2 rounded-lg border border-indigo-100 flex flex-col justify-center print:bg-white print:border-slate-200">
+                           <label className="text-[9px] font-bold uppercase text-indigo-800 mb-0.5 print:text-slate-600">Zusammengefasstes Kapital</label>
+                           <div className="font-black text-indigo-900 text-sm print:text-slate-800">{formatCurrency(calculations.effectivePlanerCapital)}</div>
+                           {calculations.transferredCapital > 0 && <div className="text-[9px] text-indigo-600 font-medium mt-0.5 print:text-slate-500">inkl. {formatCurrency(calculations.transferredCapital)} aus Verträgen</div>}
                         </div>
                       </div>
                       <div className="grid grid-cols-3 gap-3 pt-1">
@@ -1081,25 +1124,27 @@ export default function App() {
                         <div><label className="text-[10px] font-semibold text-slate-600 mb-1 block">Rendite p.a. (%)</label><input type="number" step="0.1" value={planerReturn} onChange={e => setPlanerReturn(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm font-medium" /></div>
                         <div><label className="text-[10px] font-semibold text-slate-600 mb-1 block">Dyn. p.a. (%)</label><input type="number" step="0.1" value={planerDynamic} onChange={e => setPlanerDynamic(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm font-medium" /></div>
                       </div>
-                      <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200 flex justify-between items-center mt-2 shadow-inner">
-                         <label className="flex items-center gap-2 text-[10px] font-bold text-emerald-900 cursor-pointer"><input type="checkbox" checked={includePlanerInNet} onChange={e=>setIncludePlanerInNet(e.target.checked)} className="rounded text-emerald-600" /> Mtl. Entnahme ins Netto</label>
+                      <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200 flex justify-between items-center mt-2 shadow-inner print:bg-white print:border-slate-200 print:shadow-none">
+                         <label className="flex items-center gap-2 text-[10px] font-bold text-emerald-900 cursor-pointer print:text-slate-800"><input type="checkbox" checked={includePlanerInNet} onChange={e=>setIncludePlanerInNet(e.target.checked)} className="rounded text-emerald-600" /> Mtl. Entnahme ins Netto</label>
                          <div className="text-right">
-                            <div className="text-xl font-black text-emerald-700">{formatCurrency(calculations.finalPlanerWithdrawal)}</div>
-                            {calculations.planerTax > 0 && <div className="text-[9px] text-emerald-600 font-medium">Netto (nach {formatCurrency(calculations.planerTax + (calculations.planerKist || 0))} Steuer)</div>}
+                            <div className="text-xl font-black text-emerald-700 print:text-slate-800">{formatCurrency(calculations.finalPlanerWithdrawal)}</div>
+                            {calculations.planerTax > 0 && <div className="text-[9px] text-emerald-600 font-medium print:text-slate-500">Netto (nach {formatCurrency(calculations.planerTax + (calculations.planerKist || 0))} Steuer)</div>}
                          </div>
                       </div>
                     </div>
                  </div>
-              )}
+              </div>
+
             </div>
-            <div className="p-4 bg-white border-t"><button onClick={loadDemoData} className="w-full border border-dashed rounded p-2 text-sm bg-blue-50 text-blue-700">Demo-Daten laden</button></div>
+            <div className="p-4 bg-white border-t print:hidden"><button onClick={loadDemoData} className="w-full border border-dashed rounded p-2 text-sm bg-blue-50 text-blue-700">Demo-Daten laden</button></div>
           </div>
         </div>
 
         {/* RIGHT COLUMN: RESULTS */}
         <div className="lg:col-span-6 xl:col-span-7 space-y-6">
           
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:mt-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:mt-6 break-before-page">
+            <h2 className="hidden print:block col-span-1 sm:col-span-2 text-2xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-2 text-indigo-900">Ihre Ergebnisse</h2>
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
               <h3 className="text-sm font-semibold text-slate-500 mb-1">Haushalts-Bedarf im Jahr {calculations.baseRetYear}</h3>
               <div className="text-3xl font-bold">{renderBonVal(calculations.targetIncomeFuture)}</div>
@@ -1299,34 +1344,97 @@ export default function App() {
           </div>
 
           {/* CHART */}
-          <div className={`bg-white rounded-xl border p-6 h-[400px] print:block print:h-[350px] print:mt-8 print:break-inside-avoid ${rightView === 'verlauf' ? 'block' : 'hidden'}`}>
-            <h2 className="text-sm font-bold mb-6">Kapitalverlauf (Depot-Entnahme)</h2>
+          <div className={`bg-white rounded-xl border p-6 h-auto print:block print:mt-8 print:break-inside-avoid ${rightView === 'verlauf' ? 'block' : 'hidden'}`}>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-sm font-bold">Einkommensverlauf (Netto / Monat)</h2>
+              <div className="flex gap-3 text-[10px] font-semibold text-slate-500 print:hidden">
+                <div className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-slate-400"></span> Gehalt</div>
+                <div className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-500"></span> Rente</div>
+                <div className="flex items-center gap-1"><span className="w-3 h-0.5 bg-amber-500"></span> Zielbedarf</div>
+              </div>
+            </div>
             <div className="w-full h-[280px] relative" onMouseLeave={() => setHoveredData(null)}>
+              {hoveredData && (
+                  <div className="absolute bg-white border border-slate-200 shadow-xl rounded-lg p-3 text-xs z-10 pointer-events-none print:hidden transition-all duration-100"
+                       style={{ 
+                           left: `${(hoveredData.cx / svgWidth) * 100}%`, 
+                           top: '20px', 
+                           transform: hoveredData.index > visibleChartData.length / 2 ? 'translateX(calc(-100% - 15px))' : 'translateX(15px)' 
+                       }}>
+                      <div className="font-bold text-slate-700 mb-2 border-b border-slate-100 pb-1">Alter {hoveredData.age} (Jahr {hoveredData.year})</div>
+                      {!hoveredData.isRetirement ? (
+                          <div className="text-slate-600 flex justify-between gap-4"><span>Gehalt (Netto):</span> <span className="font-bold">{formatChartCurrency(hoveredData.totalNet, hoveredData.discount)}</span></div>
+                      ) : (
+                          <>
+                              <div className="text-indigo-600 flex justify-between gap-4 mb-1"><span>Gesamt-Netto:</span> <span className="font-bold">{formatChartCurrency(hoveredData.totalNet, hoveredData.discount)}</span></div>
+                              {includePlanerInNet && hoveredData.planer > 0 && <div className="text-[10px] text-slate-500 flex justify-between gap-4"><span>davon Planer:</span> <span>{formatChartCurrency(hoveredData.planer, hoveredData.discount)}</span></div>}
+                          </>
+                      )}
+                      <div className="text-amber-600 mt-2 pt-1 border-t border-slate-100 flex justify-between gap-4"><span>Bedarf (Ziel):</span> <span className="font-bold">{formatChartCurrency(hoveredData.target, hoveredData.discount)}</span></div>
+                  </div>
+              )}
               <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full overflow-visible print:text-slate-800">
                 {yTicks.map((val, i) => (
                   <g key={`y-${i}`}>
                     <line x1={paddingX} y1={getY(val)} x2={svgWidth - paddingX} y2={getY(val)} stroke="#e2e8f0" strokeWidth="1" />
-                    <text x={paddingX - 10} y={getY(val) + 4} fontSize="11" fill="currentColor" opacity="0.5" textAnchor="end">{formatYAxis(val)}</text>
+                    <text x={paddingX - 10} y={getY(val) + 4} fontSize="13" fontWeight="bold" fill="#64748b" textAnchor="end">{formatYAxis(val)}</text>
                   </g>
                 ))}
-                {calculations.chartData.filter((d, i) => d.age % 5 === 0 || i === 0 || i === calculations.chartData.length - 1).map((d) => {
-                  const origIndex = calculations.chartData.indexOf(d);
+                
+                {visibleChartData.map((d, i) => {
+                  const cx = paddingX + i * stepX + stepX / 2;
+                  const val = showRealValue ? (d.totalNet / (d.discount || 1)) : d.totalNet;
+                  const h = Math.max(0, (val / maxY) * graphHeight);
+                  const yPos = svgHeight - bottomPadding - h;
+                  const barColor = !d.isRetirement ? '#94a3b8' : '#6366f1'; 
+
                   return (
-                    <g key={`x-${d.age}`}>
-                      <text x={getX(origIndex)} y={svgHeight - 15} fontSize="11" fill="currentColor" opacity="0.5" textAnchor="middle">{d.age} J.</text>
-                      <line x1={getX(origIndex)} y1={svgHeight - bottomPadding} x2={getX(origIndex)} y2={svgHeight - bottomPadding + 5} stroke="#cbd5e1" />
+                    <g key={`bar-${i}`}>
+                      <rect x={cx - barWidth/2} y={yPos} width={barWidth} height={h} fill={barColor} rx="2" className="transition-all duration-300" opacity={hoveredData && hoveredData.index !== i ? 0.5 : 1} />
+                      {(i === 0 || d.year === calculations.baseRetYear || d.age % 5 === 0 || i === visibleChartData.length - 1) && (
+                        <>
+                           <text x={cx} y={svgHeight - 10} fontSize="12" fontWeight="bold" fill="#64748b" textAnchor="middle">{d.age} J.</text>
+                           <line x1={cx} y1={svgHeight - bottomPadding} x2={cx} y2={svgHeight - bottomPadding + 5} stroke="#cbd5e1" />
+                        </>
+                      )}
                     </g>
                   );
                 })}
+
                 <line x1={paddingX} y1={svgHeight - bottomPadding} x2={svgWidth - paddingX} y2={svgHeight - bottomPadding} stroke="#94a3b8" strokeWidth="2" />
-                {calculations.chartData.some(d => d.etf > 0) && <path d={etfPath} fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
-                {calculations.chartData.some(d => d.planer > 0) && <path d={planerPath} fill="none" stroke="#6366f1" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="6 4" />}
-                {calculations.chartData.map((d, i) => {
-                  const rectWidth = (svgWidth - paddingX * 2) / Math.max(1, calculations.chartData.length - 1);
-                  return <rect key={`hover-${i}`} x={getX(i) - rectWidth/2} y={0} width={rectWidth} height={svgHeight - bottomPadding} fill="transparent" onMouseEnter={() => setHoveredData({ ...d, index: i })} className="cursor-crosshair print:hidden" />;
+                
+                <path d={targetPath} fill="none" stroke="#f59e0b" strokeWidth="2" strokeDasharray="4 4" />
+
+                {visibleChartData.map((d, i) => {
+                  const cx = paddingX + i * stepX + stepX / 2;
+                  return <rect key={`hover-${i}`} x={cx - stepX/2} y={0} width={stepX} height={svgHeight - bottomPadding} fill="transparent" onMouseEnter={() => setHoveredData({ ...d, index: i, cx })} className="cursor-crosshair print:hidden" />;
                 })}
-                {hoveredData && <line x1={getX(hoveredData.index)} y1={paddingY} x2={getX(hoveredData.index)} y2={svgHeight - bottomPadding} stroke="#64748b" strokeWidth="1" strokeDasharray="4 4" className="print:hidden" />}
               </svg>
+            </div>
+            
+            {/* NEU: ZEITREISEN-SLIDER */}
+            <div className="mt-8 flex items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 print:hidden shadow-inner">
+               <span className="text-xs font-bold text-slate-500 whitespace-nowrap bg-white px-2 py-1 rounded shadow-sm">Alter {Math.floor(calculations.currentAgeA)}</span>
+               <div className="flex-1 relative">
+                 <input 
+                    type="range" 
+                    min={Math.floor(calculations.currentAgeA)} 
+                    max={105 - chartWindowSize} 
+                    value={activeStartAge} 
+                    onChange={e => setManualChartStart(Number(e.target.value))} 
+                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                 />
+                 <div className="text-[10px] text-center text-slate-400 font-medium mt-1 uppercase tracking-wider">Zeitleiste verschieben</div>
+               </div>
+               <span className="text-xs font-bold text-slate-500 whitespace-nowrap bg-white px-2 py-1 rounded shadow-sm">Alter 105</span>
+               <div className="w-px h-6 bg-slate-300 mx-1"></div>
+               <button 
+                  onClick={() => setManualChartStart(null)} 
+                  className="text-xs flex items-center gap-1.5 bg-white border border-slate-300 text-slate-600 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-100 hover:text-indigo-600 transition-all shadow-sm"
+                  title="Zurück zum Renteneintritt springen"
+               >
+                  <Clock className="w-3.5 h-3.5" /> Fokus Rente
+               </button>
             </div>
           </div>
 
@@ -1400,29 +1508,53 @@ export default function App() {
              </div>
           ) : (
              <div className="space-y-6 text-sm leading-relaxed">
-                <p className="font-semibold text-slate-600 mb-6">Dieses Gutachten basiert auf der aktuellen Steuer- und Sozialgesetzgebung der Bundesrepublik Deutschland. Die nachfolgenden Erläuterungen legen die methodischen und rechtlichen Berechnungsgrundlagen dieses Dokuments offen.</p>
+                <p className="font-semibold text-slate-600 mb-6">Dieses erweiterte Gutachten basiert auf der aktuellen Steuer- und Sozialgesetzgebung der Bundesrepublik Deutschland (Stand 2026) und projiziert diese durch mathematische Indexierungs-Parameter in die Zukunft.</p>
+
+                <div className="grid grid-cols-2 gap-8 mb-6">
+                    <div>
+                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">1. Grundfreibetrag & Tarif-Indexierung</h3>
+                       <p className="mb-2">Der steuerliche Grundfreibetrag sichert das Existenzminimum. Im Jahr 2026 liegt dieser bei <strong>12.348 € für Ledige</strong> (24.696 € für Verheiratete). Um die sogenannte "kalte Progression" (heimliche Steuererhöhung durch Inflation) auszugleichen, wird dieser Betrag regelmäßig angehoben.</p>
+                       <p className="mb-2"><strong>Historische Entwicklung:</strong> Vor 20 Jahren (2006) lag der Freibetrag noch bei 7.664 €. Das entspricht einer durchschnittlichen historischen Steigerung von rund 2,4 % pro Jahr.</p>
+                       <p className="mb-2"><strong>Ihre Prognose (mit {taxIndexRate.toLocaleString("de-DE")} % p.a. Indexierung):</strong></p>
+                       <ul className="list-disc pl-5 mb-2 text-slate-700 space-y-1">
+                          <li>In 20 Jahren (2046): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 20))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 20))} Verheiratet)</span></li>
+                          <li>In 30 Jahren (2056): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 30))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 30))} Verheiratet)</span></li>
+                          <li>In 40 Jahren (2066): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 40))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 40))} Verheiratet)</span></li>
+                       </ul>
+                       <p className="text-xs text-indigo-800 bg-indigo-50 p-2 rounded">Diese dynamische Anpassung ist in der Steuer-Engine dieser Auswertung vollständig integriert und schützt Ihre zukünftige Kaufkraft in der Berechnung vor unrealistischen Steuerlasten.</p>
+                    </div>
+
+                    <div>
+                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">2. Ehegattensplitting</h3>
+                       <p className="mb-4">Das deutsche Steuerrecht erlaubt für zusammen veranlagte Ehepaare das Splittingverfahren. Dabei werden die steuerpflichtigen Einkünfte beider Partner (nach Abzug aller Freibeträge) in einen Topf geworfen, addiert und anschließend halbiert. Auf diese eine Hälfte wird der Einkommensteuertarif angewendet. Die daraus resultierende Steuer wird am Ende verdoppelt.</p>
+                       <p className="mb-2"><strong>Der mathematische Hebel:</strong> Dieser Mechanismus ist in der Altersvorsorge enorm wertvoll, wenn ein Partner eine deutlich höhere Rente bezieht als der andere (z. B. durch Erziehungszeiten oder Teilzeit). Durch das fiktive "Teilen" des Einkommens wird die harte Steuerprogression des Besserverdienenden massiv abgemildert.</p>
+                       <div className={`p-2 rounded text-xs font-bold border ${isMarried ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                           Status für diese Auswertung: {isMarried ? 'Splitting-Verfahren für Ehepaare ist AKTIVIERT.' : 'Grundtarif für Einzelveranlagung (Single) ist AKTIVIERT.'}
+                       </div>
+                    </div>
+                </div>
 
                 <div className="grid grid-cols-2 gap-8">
                     <div>
-                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">Krankenversicherung der Rentner (KVdR)</h3>
+                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">3. Krankenversicherung der Rentner (KVdR)</h3>
                        <p className="mb-4">Die KVdR ist keine eigenständige Kasse, sondern ein begehrter Versichertenstatus. Erreicht wird er über die "9/10-Regelung" (mind. 90 % der zweiten Erwerbslebenshälfte gesetzlich versichert). Der gravierende Vorteil: KVdR-Mitglieder zahlen KV/PV-Beiträge <strong>nur auf gesetzliche Renten und Betriebsrenten</strong>. Einkünfte aus Kapitalvermögen (ETFs, private Renten) oder Vermietung bleiben zu 100 % beitragsfrei.</p>
 
-                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1 mt-6">Kohortenbesteuerung (Schicht 1)</h3>
+                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1 mt-6">4. Kohortenbesteuerung (Schicht 1)</h3>
                        <p className="mb-4">Gemäß Alterseinkünftegesetz steigt die Steuerpflicht für gesetzliche Renten und Rürup-Renten sukzessive an. Wer 2026 in Rente geht, muss 84 % seiner ersten vollen Jahresrente versteuern. Die restlichen 16 % werden als <strong>absoluter Euro-Betrag auf Lebenszeit eingefroren</strong>. Die Konsequenz: Jede zukünftige gesetzliche Rentenerhöhung erhöht das zu versteuernde Einkommen unmittelbar zu 100 %.</p>
                     </div>
 
                     <div>
-                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">Betriebsrenten & Doppelverbeitragung</h3>
+                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">5. Betriebsrenten & Doppelverbeitragung</h3>
                        <p className="mb-4">Die betriebliche Altersvorsorge (bAV) mindert in der Erwerbsphase Steuern und Sozialabgaben. Im Alter dreht sich dies um: bAV-Renten sind voll steuerpflichtig. Gravierender ist die Sozialversicherungspflicht: Rentner müssen hierauf den <strong>vollen Kranken- und Pflegeversicherungsbeitrag (ca. 19 - 20 %)</strong> abführen (abzgl. eines kleinen Freibetrags). Dies ist die sogenannte Doppelverbeitragung.</p>
 
-                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1 mt-6">Steuerprivilegien in Schicht 3</h3>
-                       <p className="mb-2"><strong>Private Leibrenten:</strong> Unterliegen nur der Ertragsanteilsbesteuerung nach § 22 EStG. Geht man mit 67 in Rente, rechnet das Finanzamt fiktiv nur 17 % der Rente als steuerpflichtiges Einkommen an.</p>
+                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1 mt-6">6. Steuerprivilegien in Schicht 3</h3>
+                       <p className="mb-2"><strong>Private Leibrenten:</strong> Unterliegen nur der Ertragsanteilsbesteuerung nach § 22 EStG. Geht man mit 67 in Rente, rechnet das Finanzamt fiktiv nur ca. 17 % der Rente als steuerpflichtiges Einkommen an.</p>
                        <p className="mb-2"><strong>Kapitalauszahlungen:</strong> Bei Laufzeiten über 12 Jahren und Auszahlung ab Alter 62 greift das <strong>Halbeinkünfteverfahren</strong>. 50 % des Gewinns sind steuerfrei, die andere Hälfte unterliegt dem persönlichen Steuersatz.</p>
                        <p><strong>ETF-Depots:</strong> Realisierte Kursgewinne unterliegen der Abgeltungsteuer (25 % + Soli). Bei reinen Aktien-ETFs bleiben durch das Investmentsteuergesetz (Teilfreistellung) <strong>30 % aller Gewinne komplett steuerfrei</strong>.</p>
                     </div>
                 </div>
                 <div className="mt-8 text-[10px] text-slate-400 text-center border-t border-slate-200 pt-4 font-semibold uppercase tracking-wider">
-                    Hinweis: Alle Berechnungen in diesem Dokument sind softwaregestützte Simulationen und ersetzen keine rechtsverbindliche Steuerberatung.
+                    Hinweis: Alle Berechnungen in diesem Dokument sind softwaregestützte Simulationen und ersetzen keine rechtsverbindliche Steuerberatung. Stand der Steuergesetzgebung: 2026.
                 </div>
              </div>
           )}
