@@ -120,7 +120,7 @@ export default function App() {
   const [showTaxInfo, setShowTaxInfo] = useState(false); 
   const [showBenchmark, setShowBenchmark] = useState(false);
   const [printExplanationMode, setPrintExplanationMode] = useState('short'); 
-  const [manualChartStart, setManualChartStart] = useState(null); // NEU: Für den Chart-Slider
+  const [manualChartStart, setManualChartStart] = useState(null); 
 
   // --- RENTEN-SCHÄTZER STATES & LOGIK ---
   const [estimatorPerson, setEstimatorPerson] = useState(null);
@@ -684,8 +684,8 @@ export default function App() {
 
     // --- INCOME CHART DATA (Bar Chart) ---
     const incomeChartData = [];
-    const startYearChart = currentYear; // Startet immer im aktuellen Jahr
-    const endYearChart = currentYear + Math.max(50, 105 - Math.floor(currentAgeA)); // Berechnet bis Alter 105
+    const startYearChart = currentYear; 
+    const endYearChart = currentYear + Math.max(50, 105 - Math.floor(currentAgeA)); 
     
     const etfNets = finalizedContracts.filter(c => c.type === 'etf' && (c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')) === 'rent');
 
@@ -754,7 +754,6 @@ export default function App() {
   const activeStartAge = manualChartStart !== null ? manualChartStart : defaultStartAge;
   const visibleChartData = calculations.incomeChartData.filter(d => d.age >= activeStartAge && d.age <= activeStartAge + chartWindowSize);
 
-  // ACHTUNG: paddingX von 40 auf 55 erhöht, damit die großen fetten Zahlen Platz haben
   const svgWidth = 800, svgHeight = 300, paddingX = 55, paddingY = 20, bottomPadding = 30, graphHeight = svgHeight - paddingY - bottomPadding;
   
   const maxDataVal = visibleChartData.length > 0 ? Math.max(...visibleChartData.map(d => {
@@ -871,6 +870,39 @@ export default function App() {
     </div>
   );
 
+  const renderBonContract = (c) => {
+    const strategy = c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent');
+    const isKapital = c.type === 'etf' || c.type.includes('Kapital');
+    const bruttoKapital = c.type === 'etf' ? c.totalCap : c.gross;
+    
+    const headerColor = c.layer === 1 ? 'text-blue-900' : c.layer === 2 ? 'text-purple-900' : 'text-emerald-900';
+
+    return (
+      <div key={c.id} className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
+        <div className="flex justify-between items-center mb-1">
+          <div className={`font-semibold text-sm ${headerColor}`}>{c.name} {isMarried ? `(${c.owner})` : ''}</div>
+          <div className={`font-bold text-base ${strategy !== 'rent' ? 'text-slate-400' : 'text-slate-800'}`}>
+            {strategy !== 'rent' ? '0 €' : renderBonVal(c.net)}
+          </div>
+        </div>
+        <div className="flex justify-between items-end text-[10px] text-slate-500">
+          <div>
+            {isKapital
+              ? `Brutto-Kapital: ${formatResultCurrency(bruttoKapital)} (Netto: ${formatResultCurrency(c.netCapital || 0)}) | ${strategy === 'planer' ? 'In Planer übertragen' : strategy === 'ignore' ? 'Ignoriert' : 'Mtl. Entnahme'}`
+              : `Brutto: ${formatResultCurrency(c.gross)}`}
+          </div>
+          {(c.kvpv_deduction > 0 || (c.tax || 0) > 0 || (c.kist || 0) > 0) && (
+            <div className="text-rose-500 text-right leading-tight">
+              {c.kvpv_deduction > 0 ? `KV/PV: ${formatResultCurrency(c.kvpv_deduction)} | ` : ''}
+              {c.type === 'etf' ? 'Abgeltung: ' : 'ESt: '}
+              {formatResultCurrency((c.tax || 0) + (c.kist || 0))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-28 print:bg-white print:pb-0">
       
@@ -927,8 +959,64 @@ export default function App() {
 
       <main className="max-w-6xl mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 print:p-0 print:block">
         
+        {/* PRINT ONLY: ZUSAMMENFASSUNG EINGABEN */}
+        <div className="hidden print:block mb-8 break-inside-avoid">
+           <h2 className="text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-4 text-slate-800">1. Ihre Eingabedaten & Prämissen</h2>
+           
+           <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6">
+              <div className="grid grid-cols-2 gap-y-4 gap-x-8 text-sm">
+                 <div><span className="font-bold">Alter heute:</span> {Math.floor(calculations.currentAgeA)} Jahre {isMarried ? `(Person A) / ${Math.floor(calculations.currentAgeB)} Jahre (Person B)` : ''}</div>
+                 <div><span className="font-bold">Renteneintritt:</span> {Math.floor(calculations.retirementAgeA)} Jahre (im Jahr {calculations.baseRetYear})</div>
+                 <div><span className="font-bold">Zielbedarf (Netto):</span> {formatCurrency(targetIncomeToday)} (in Kaufkraft heute)</div>
+                 <div><span className="font-bold">Steuer-Status:</span> {isMarried ? 'Splittingtarif (Verheiratet)' : 'Grundtarif (Single)'}</div>
+                 <div><span className="font-bold">KV-Status im Alter:</span> {kvStatus === 'kvdr' ? 'KVdR (Pflichtversichert)' : kvStatus === 'pkv' ? 'Privat versichert (PKV)' : 'Freiwillig gesetzlich'}</div>
+                 <div><span className="font-bold">Inflation (angenommen):</span> {inflationRate.toLocaleString("de-DE")} % p.a.</div>
+                 <div><span className="font-bold">Tarif-Indexierung:</span> {taxIndexRate.toLocaleString("de-DE")} % p.a.</div>
+              </div>
+           </div>
+
+           <div className="mb-6">
+              <h3 className="font-bold text-slate-800 mb-2">Gesetzliche Basis (Schicht 1)</h3>
+              <ul className="list-disc pl-5 text-sm text-slate-700 space-y-1">
+                 <li>Brutto-Anspruch heute: <strong>{formatCurrency(grvGrossA)} / Monat</strong> {isMarried && grvGrossB > 0 ? `(Person A) & ${formatCurrency(grvGrossB)} / Monat (Person B)` : ''} <span className="text-slate-500">(Dynamik: {grvIncreaseRate}% p.a.)</span></li>
+              </ul>
+           </div>
+
+           {contracts.length > 0 && (
+             <div>
+                <h3 className="font-bold text-slate-800 mb-2">Ihre Zusatz-Verträge & Depots</h3>
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b-2 border-slate-200 text-slate-800">
+                      <th className="pb-2 font-bold w-20">Schicht</th>
+                      <th className="pb-2 font-bold w-28">Art</th>
+                      <th className="pb-2 font-bold">Name / Inhaber</th>
+                      <th className="pb-2 font-bold">Wert / Beitrag</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-slate-700">
+                     {contracts.map(c => (
+                        <tr key={c.id} className="border-b border-slate-100">
+                           <td className="py-2">Schicht {c.layer}</td>
+                           <td className="py-2 uppercase">{c.type.replace('prvKapital', 'Privat (Kapital)').replace('prvRente', 'Privat (Rente)').replace('bavKapital', 'bAV (Kapital)')}</td>
+                           <td className="py-2 font-medium">{c.name} {isMarried ? `(${c.owner})` : ''}</td>
+                           <td className="py-2 text-xs">
+                              {c.type === 'etf' ? `Kapital heute: ${formatCurrency(c.capital)} | Sparrate: ${formatCurrency(c.monthly)}/M` : 
+                               c.type.includes('Kapital') ? `Zielkapital: ${formatCurrency(c.gross)}` :
+                               c.type === 'immobilie' ? `Kaltmiete: ${formatCurrency(c.gross)}/M` :
+                               `Garantierente: ${formatCurrency(c.gross)}/M Brutto`
+                              }
+                           </td>
+                        </tr>
+                     ))}
+                  </tbody>
+                </table>
+             </div>
+           )}
+        </div>
+
         {/* LEFT COLUMN: INPUTS */}
-        <div className="lg:col-span-6 xl:col-span-5 space-y-6">
+        <div className="lg:col-span-6 xl:col-span-5 space-y-6 print:hidden">
           
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 print:shadow-none print:border-none print:p-0">
             <h2 className="text-sm font-bold mb-4 text-slate-700 border-b border-slate-100 pb-2 print:text-lg print:text-indigo-900 print:border-indigo-200">Allgemeine Daten & Ziel</h2>
@@ -1141,10 +1229,10 @@ export default function App() {
         </div>
 
         {/* RIGHT COLUMN: RESULTS */}
-        <div className="lg:col-span-6 xl:col-span-7 space-y-6">
+        <div className="lg:col-span-6 xl:col-span-7 space-y-6 print:col-span-12">
           
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:mt-6 break-before-page">
-            <h2 className="hidden print:block col-span-1 sm:col-span-2 text-2xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-2 text-indigo-900">Ihre Ergebnisse</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:mt-0">
+            <h2 className="hidden print:block col-span-1 sm:col-span-2 text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-4 text-slate-800 mt-4 break-inside-avoid">2. Ergebnis: Ihr Kassenbon im Rentenalter</h2>
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
               <h3 className="text-sm font-semibold text-slate-500 mb-1">Haushalts-Bedarf im Jahr {calculations.baseRetYear}</h3>
               <div className="text-3xl font-bold">{renderBonVal(calculations.targetIncomeFuture)}</div>
@@ -1242,17 +1330,18 @@ export default function App() {
                   <div className="font-bold text-sm text-blue-900">Schicht 1 (Basis)</div>
                   <div className="font-bold">{renderBonVal(calculations.s1_net)}</div>
                 </div>
-                <div className={`p-3 bg-white text-xs border-t border-blue-100 space-y-2 ${expandedSections.s1 ? 'block' : 'hidden'} print:block`}>
-                  <div className="flex justify-between bg-slate-50 p-2 rounded">
-                    <div><span className="font-semibold block">Gesetzliche Rente (Haushalt)</span><span className="text-[10px] text-slate-500">Brutto: {formatResultCurrency(calculations.grvFutureGrossTotal)}</span></div>
-                    <div className="text-right"><span className="font-bold block">{renderBonVal(calculations.grvNet)}</span><span className="text-[10px] text-rose-500">KV/PV: {formatResultCurrency(calculations.grvKvpv)} | ESt: {formatResultCurrency(calculations.grvESt + calculations.grvKist)}</span></div>
-                  </div>
-                  {calculations.contracts.filter(c=>c.layer===1).map(c=>(
-                    <div key={c.id} className="flex justify-between bg-slate-50 p-2 rounded">
-                      <div><span className="font-semibold block">{c.name} ({c.owner})</span></div>
-                      <div className="text-right"><span className="font-bold block">{renderBonVal(c.net)}</span><span className="text-[10px] text-rose-500">ESt: {formatResultCurrency(c.tax+(c.kist||0))}</span></div>
+                <div className={`p-3 bg-white text-xs border-t border-blue-100 space-y-2 ${expandedSections.s1 ? 'block' : 'hidden'} print:block print:space-y-0 print:border-t-0 print:p-0 print:mt-3`}>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
+                    <div className="flex justify-between items-center mb-1">
+                      <div className="font-semibold text-sm text-blue-900">Gesetzliche Rente (Haushalt)</div>
+                      <div className="font-bold text-base text-slate-800">{renderBonVal(calculations.grvNet)}</div>
                     </div>
-                  ))}
+                    <div className="flex justify-between items-end text-[10px] text-slate-500">
+                      <div>Brutto: {formatResultCurrency(calculations.grvFutureGrossTotal)}</div>
+                      <div className="text-rose-500 text-right leading-tight">KV/PV: {formatResultCurrency(calculations.grvKvpv)} | ESt: {formatResultCurrency(calculations.grvESt + calculations.grvKist)}</div>
+                    </div>
+                  </div>
+                  {calculations.contracts.filter(c=>c.layer===1).map(c => renderBonContract(c))}
                 </div>
               </div>
 
@@ -1261,31 +1350,8 @@ export default function App() {
                   <div className="font-bold text-sm text-purple-900">Schicht 2 (Zusatz)</div>
                   <div className="font-bold">{renderBonVal(calculations.s2_net)}</div>
                 </div>
-                <div className={`p-3 bg-white text-xs border-t border-purple-100 space-y-2 ${expandedSections.s2 ? 'block' : 'hidden'} print:block`}>
-                   {calculations.contracts.filter(c=>c.layer===2).map(c=>{
-                    const strategy = c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent');
-                    const isKapital = c.type.includes('Kapital');
-                    return (
-                    <div key={c.id} className="flex justify-between bg-slate-50 p-2 rounded">
-                      <div>
-                         <span className="font-semibold block">{c.name} ({c.owner})</span>
-                         <span className="text-[10px] text-slate-500">
-                           {isKapital 
-                             ? `Brutto: ${formatResultCurrency(c.gross)} (Netto: ${formatResultCurrency(c.netCapital)}) | ${strategy === 'planer' ? 'In Planer' : strategy === 'ignore' ? 'Ignoriert' : 'Mtl. Entnahme'}`
-                             : `Brutto: ${formatResultCurrency(c.gross)}`}
-                         </span>
-                      </div>
-                      <div className="text-right">
-                         <span className={`font-bold block ${strategy!=='rent'?'text-slate-400':''}`}>{strategy!=='rent'?'0 €':renderBonVal(c.net)}</span>
-                         {(c.kvpv_deduction > 0 || (c.tax || 0) > 0 || (c.kist || 0) > 0) && (
-                           <span className="text-[10px] text-rose-500">
-                             {c.kvpv_deduction > 0 ? `KV/PV: ${formatResultCurrency(c.kvpv_deduction)} | ` : ''}
-                             ESt: {formatResultCurrency((c.tax || 0) + (c.kist || 0))}
-                           </span>
-                         )}
-                      </div>
-                    </div>
-                   )})}
+                <div className={`p-3 bg-white text-xs border-t border-purple-100 space-y-2 ${expandedSections.s2 ? 'block' : 'hidden'} print:block print:space-y-0 print:border-t-0 print:p-0 print:mt-3`}>
+                   {calculations.contracts.filter(c=>c.layer===2).map(c => renderBonContract(c))}
                 </div>
               </div>
 
@@ -1294,49 +1360,24 @@ export default function App() {
                   <div className="font-bold text-sm text-emerald-900">Schicht 3 (Privat)</div>
                   <div className="font-bold">{renderBonVal(calculations.s3_net)}</div>
                 </div>
-                <div className={`p-3 bg-white text-xs border-t border-emerald-100 space-y-2 ${expandedSections.s3 ? 'block' : 'hidden'} print:block`}>
-                  {calculations.contracts.filter(c=>c.layer===3).map(c=>{
-                    const strategy = c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent');
-                    const isKapital = c.type === 'etf' || c.type.includes('Kapital');
-                    const bruttoKapital = c.type === 'etf' ? c.totalCap : c.gross;
-                    return (
-                    <div key={c.id} className="flex justify-between bg-slate-50 p-2 rounded">
-                      <div>
-                        <span className="font-semibold block">{c.name} {c.owner?`(${c.owner})`:''}</span>
-                        <span className="text-[10px] text-slate-500">
-                           {isKapital
-                             ? `Kapital: ${formatResultCurrency(bruttoKapital)} (Netto: ${formatResultCurrency(c.netCapital)}) | ${strategy === 'planer' ? 'In Planer' : strategy === 'ignore' ? 'Ignoriert' : `Mtl. Brutto: ${formatResultCurrency(c.grossMonthly)}`}`
-                             : `Brutto: ${formatResultCurrency(c.gross)}`}
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <span className={`font-bold block ${strategy!=='rent'?'text-slate-400':''}`}>{strategy!=='rent'?'0 €':renderBonVal(c.net)}</span>
-                        {(c.kvpv_deduction > 0 || (c.tax || 0) > 0 || (c.kist || 0) > 0) && (
-                          <span className="text-[10px] text-rose-500">
-                            {c.kvpv_deduction > 0 ? `KV/PV: ${formatResultCurrency(c.kvpv_deduction)} | ` : ''}
-                            {c.type === 'etf' ? 'Abgeltung: ' : 'ESt: '}
-                            {formatResultCurrency((c.tax || 0) + (c.kist || 0))}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )})}
+                <div className={`p-3 bg-white text-xs border-t border-emerald-100 space-y-2 ${expandedSections.s3 ? 'block' : 'hidden'} print:block print:space-y-0 print:border-t-0 print:p-0 print:mt-3`}>
+                  {calculations.contracts.filter(c=>c.layer===3).map(c => renderBonContract(c))}
                   {includePlanerInNet && (
-                    <div className="flex justify-between bg-indigo-50 p-2 rounded border-l-2 border-indigo-400 mt-2">
-                      <div>
-                         <span className="font-semibold text-indigo-900 block">Planer Wunsch-Rente</span>
-                         <span className="text-[10px] text-indigo-700/70">Brutto: {formatResultCurrency(calculations.finalPlanerWithdrawalGross)}</span>
-                      </div>
-                      <div className="text-right">
-                         <span className="font-bold text-indigo-900 block">{renderBonVal(calculations.finalPlanerWithdrawal)}</span>
-                         {calculations.planerTax > 0 && <span className="text-[10px] text-rose-500">Abgeltung: {formatResultCurrency(calculations.planerTax + (calculations.planerKist || 0))}</span>}
-                      </div>
+                    <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100 mb-2 break-inside-avoid">
+                       <div className="flex justify-between items-center mb-1">
+                         <div className="font-semibold text-sm text-indigo-900">Planer Wunsch-Rente</div>
+                         <div className="font-bold text-base text-indigo-900">{renderBonVal(calculations.finalPlanerWithdrawal)}</div>
+                       </div>
+                       <div className="flex justify-between items-end text-[10px] text-indigo-700/70">
+                         <div>Brutto: {formatResultCurrency(calculations.finalPlanerWithdrawalGross)}</div>
+                         {calculations.planerTax > 0 && <div className="text-rose-500 text-right leading-tight">Abgeltung: {formatResultCurrency(calculations.planerTax + (calculations.planerKist || 0))}</div>}
+                       </div>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="flex justify-between p-4 mt-4 rounded bg-slate-900 text-white print:bg-slate-100 print:text-slate-800 print:border">
+              <div className="flex justify-between p-4 mt-4 rounded bg-slate-900 text-white print:bg-slate-100 print:text-slate-800 print:border break-inside-avoid">
                 <div className="font-bold text-lg">Erwartetes Gesamt-Netto</div>
                 <div className="font-bold text-xl">{renderBonVal(calculations.totalNetFuture)}</div>
               </div>
@@ -1491,73 +1532,75 @@ export default function App() {
         <div className="hidden print:block max-w-6xl mx-auto p-6 mt-8 break-before-page text-slate-800">
           <h2 className="text-2xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-6 text-indigo-900">Exkurs: Steuerliche & Rechtliche Grundlagen</h2>
 
-          {printExplanationMode === 'short' ? (
-             <div className="space-y-6 text-sm leading-relaxed">
-                <div>
-                   <h3 className="font-bold text-lg mb-1 text-slate-900">1. Schicht 1 (Gesetzliche Rente & Basisrente)</h3>
-                   <p>Diese Schicht unterliegt der <strong>nachgelagerten Kohortenbesteuerung</strong>. Der steuerpflichtige Anteil richtet sich nach dem Jahr Ihres Renteneintritts (z. B. 84 % im Jahr 2026). Die verbleibenden steuerfreien 16 % werden im ersten Rentenjahr als absoluter Euro-Betrag auf Lebenszeit eingefroren. Alle künftigen Rentenerhöhungen (Inflationsausgleich) sind somit zu 100 % steuerpflichtig. In der KVdR fallen hierauf Beiträge zur Kranken- und Pflegeversicherung an.</p>
-                </div>
-                <div>
-                   <h3 className="font-bold text-lg mb-1 text-slate-900">2. Schicht 2 (Betriebliche Altersvorsorge & Riester)</h3>
-                   <p>Betriebs- und Riester-Renten sind in der Auszahlungsphase <strong>voll einkommensteuerpflichtig</strong>. Bei Betriebsrenten (bAV) aus einer Entgeltumwandlung müssen gesetzlich Versicherte in der Auszahlungsphase zudem die <strong>vollen Beiträge zur Kranken- und Pflegeversicherung</strong> (Arbeitnehmer- und Arbeitgeberanteil) abführen. Dies mindert die reale Rendite von Verträgen ohne hohen Arbeitgeberzuschuss oft spürbar.</p>
-                </div>
-                <div>
-                   <h3 className="font-bold text-lg mb-1 text-slate-900">3. Schicht 3 (Private Renten, Immobilien & ETFs)</h3>
-                   <p>Diese Verträge sind im Alter steuerlich stark begünstigt. Bei einer lebenslangen privaten Rente greift die <strong>Ertragsanteilsbesteuerung</strong> (bei Renteneintritt mit 67 Jahren sind nur 17 % der Rente steuerpflichtig). Depotentnahmen unterliegen der Abgeltungsteuer (25 % zzgl. Soli), wobei Aktien-ETFs eine <strong>Teilfreistellung von 30 %</strong> (komplett steuerfrei) genießen. Zudem sind Auszahlungen aus der Schicht 3 für Pflichtversicherte in der KVdR komplett kranken- und pflegeversicherungsfrei.</p>
-                </div>
-             </div>
-          ) : (
-             <div className="space-y-6 text-sm leading-relaxed">
-                <p className="font-semibold text-slate-600 mb-6">Dieses erweiterte Gutachten basiert auf der aktuellen Steuer- und Sozialgesetzgebung der Bundesrepublik Deutschland (Stand 2026) und projiziert diese durch mathematische Indexierungs-Parameter in die Zukunft.</p>
+          <div className="print:columns-2 print:gap-8 text-sm leading-relaxed">
+            {printExplanationMode === 'short' ? (
+               <>
+                  <div className="break-inside-avoid mb-6">
+                     <h3 className="font-bold text-lg mb-1 text-slate-900">1. Schicht 1 (Gesetzliche Rente & Basisrente)</h3>
+                     <p>Diese Schicht unterliegt der <strong>nachgelagerten Kohortenbesteuerung</strong>. Der steuerpflichtige Anteil richtet sich nach dem Jahr Ihres Renteneintritts (z. B. 84 % im Jahr 2026). Die verbleibenden steuerfreien 16 % werden im ersten Rentenjahr als absoluter Euro-Betrag auf Lebenszeit eingefroren. Alle künftigen Rentenerhöhungen (Inflationsausgleich) sind somit zu 100 % steuerpflichtig. In der KVdR fallen hierauf Beiträge zur Kranken- und Pflegeversicherung an.</p>
+                  </div>
+                  <div className="break-inside-avoid mb-6">
+                     <h3 className="font-bold text-lg mb-1 text-slate-900">2. Schicht 2 (Betriebliche Altersvorsorge & Riester)</h3>
+                     <p>Betriebs- und Riester-Renten sind in der Auszahlungsphase <strong>voll einkommensteuerpflichtig</strong>. Bei Betriebsrenten (bAV) aus einer Entgeltumwandlung müssen gesetzlich Versicherte in der Auszahlungsphase zudem die <strong>vollen Beiträge zur Kranken- und Pflegeversicherung</strong> (Arbeitnehmer- und Arbeitgeberanteil) abführen. Dies mindert die reale Rendite von Verträgen ohne hohen Arbeitgeberzuschuss oft spürbar.</p>
+                  </div>
+                  <div className="break-inside-avoid mb-6">
+                     <h3 className="font-bold text-lg mb-1 text-slate-900">3. Schicht 3 (Private Renten, Immobilien & ETFs)</h3>
+                     <p>Diese Verträge sind im Alter steuerlich stark begünstigt. Bei einer lebenslangen privaten Rente greift die <strong>Ertragsanteilsbesteuerung</strong> (bei Renteneintritt mit 67 Jahren sind nur 17 % der Rente steuerpflichtig). Depotentnahmen unterliegen der Abgeltungsteuer (25 % zzgl. Soli), wobei Aktien-ETFs eine <strong>Teilfreistellung von 30 %</strong> (komplett steuerfrei) genießen. Zudem sind Auszahlungen aus der Schicht 3 für Pflichtversicherte in der KVdR komplett kranken- und pflegeversicherungsfrei.</p>
+                  </div>
+               </>
+            ) : (
+               <>
+                  <p className="font-semibold text-slate-600 mb-6 break-inside-avoid">Dieses erweiterte Gutachten basiert auf der aktuellen Steuer- und Sozialgesetzgebung der Bundesrepublik Deutschland (Stand 2026) und projiziert diese durch mathematische Indexierungs-Parameter in die Zukunft.</p>
 
-                <div className="grid grid-cols-2 gap-8 mb-6">
-                    <div>
-                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">1. Grundfreibetrag & Tarif-Indexierung</h3>
-                       <p className="mb-2">Der steuerliche Grundfreibetrag sichert das Existenzminimum. Im Jahr 2026 liegt dieser bei <strong>12.348 € für Ledige</strong> (24.696 € für Verheiratete). Um die sogenannte "kalte Progression" (heimliche Steuererhöhung durch Inflation) auszugleichen, wird dieser Betrag regelmäßig angehoben.</p>
-                       <p className="mb-2"><strong>Historische Entwicklung:</strong> Vor 20 Jahren (2006) lag der Freibetrag noch bei 7.664 €. Das entspricht einer durchschnittlichen historischen Steigerung von rund 2,4 % pro Jahr.</p>
-                       <p className="mb-2"><strong>Ihre Prognose (mit {taxIndexRate.toLocaleString("de-DE")} % p.a. Indexierung):</strong></p>
-                       <ul className="list-disc pl-5 mb-2 text-slate-700 space-y-1">
-                          <li>In 20 Jahren (2046): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 20))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 20))} Verheiratet)</span></li>
-                          <li>In 30 Jahren (2056): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 30))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 30))} Verheiratet)</span></li>
-                          <li>In 40 Jahren (2066): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 40))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 40))} Verheiratet)</span></li>
-                       </ul>
-                       <p className="text-xs text-indigo-800 bg-indigo-50 p-2 rounded">Diese dynamische Anpassung ist in der Steuer-Engine dieser Auswertung vollständig integriert und schützt Ihre zukünftige Kaufkraft in der Berechnung vor unrealistischen Steuerlasten.</p>
-                    </div>
+                  <div className="break-inside-avoid mb-6">
+                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">1. Grundfreibetrag & Tarif-Indexierung</h3>
+                     <p className="mb-2">Der steuerliche Grundfreibetrag sichert das Existenzminimum. Im Jahr 2026 liegt dieser bei <strong>12.348 € für Ledige</strong> (24.696 € für Verheiratete). Um die sogenannte "kalte Progression" (heimliche Steuererhöhung durch Inflation) auszugleichen, wird dieser Betrag regelmäßig angehoben.</p>
+                     <p className="mb-2"><strong>Historische Entwicklung:</strong> Vor 20 Jahren (2006) lag der Freibetrag noch bei 7.664 €. Das entspricht einer durchschnittlichen historischen Steigerung von rund 2,4 % pro Jahr.</p>
+                     <p className="mb-2"><strong>Ihre Prognose (mit {taxIndexRate.toLocaleString("de-DE")} % p.a. Indexierung):</strong></p>
+                     <ul className="list-disc pl-5 mb-2 text-slate-700 space-y-1">
+                        <li>In 20 Jahren (2046): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 20))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 20))} Verheiratet)</span></li>
+                        <li>In 30 Jahren (2056): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 30))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 30))} Verheiratet)</span></li>
+                        <li>In 40 Jahren (2066): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 40))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 40))} Verheiratet)</span></li>
+                     </ul>
+                     <p className="text-xs text-indigo-800 bg-indigo-50 p-2 rounded mt-3">Diese dynamische Anpassung ist in der Steuer-Engine dieser Auswertung vollständig integriert und schützt Ihre zukünftige Kaufkraft in der Berechnung vor unrealistischen Steuerlasten.</p>
+                  </div>
 
-                    <div>
-                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">2. Ehegattensplitting</h3>
-                       <p className="mb-4">Das deutsche Steuerrecht erlaubt für zusammen veranlagte Ehepaare das Splittingverfahren. Dabei werden die steuerpflichtigen Einkünfte beider Partner (nach Abzug aller Freibeträge) in einen Topf geworfen, addiert und anschließend halbiert. Auf diese eine Hälfte wird der Einkommensteuertarif angewendet. Die daraus resultierende Steuer wird am Ende verdoppelt.</p>
-                       <p className="mb-2"><strong>Der mathematische Hebel:</strong> Dieser Mechanismus ist in der Altersvorsorge enorm wertvoll, wenn ein Partner eine deutlich höhere Rente bezieht als der andere (z. B. durch Erziehungszeiten oder Teilzeit). Durch das fiktive "Teilen" des Einkommens wird die harte Steuerprogression des Besserverdienenden massiv abgemildert.</p>
-                       <div className={`p-2 rounded text-xs font-bold border ${isMarried ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                           Status für diese Auswertung: {isMarried ? 'Splitting-Verfahren für Ehepaare ist AKTIVIERT.' : 'Grundtarif für Einzelveranlagung (Single) ist AKTIVIERT.'}
-                       </div>
-                    </div>
-                </div>
+                  <div className="break-inside-avoid mb-6">
+                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">2. Ehegattensplitting</h3>
+                     <p className="mb-4">Das deutsche Steuerrecht erlaubt für zusammen veranlagte Ehepaare das Splittingverfahren. Dabei werden die steuerpflichtigen Einkünfte beider Partner (nach Abzug aller Freibeträge) in einen Topf geworfen, addiert und anschließend halbiert. Auf diese eine Hälfte wird der Einkommensteuertarif angewendet. Die daraus resultierende Steuer wird am Ende verdoppelt.</p>
+                     <p className="mb-2"><strong>Der mathematische Hebel:</strong> Dieser Mechanismus ist in der Altersvorsorge enorm wertvoll, wenn ein Partner eine deutlich höhere Rente bezieht als der andere (z. B. durch Erziehungszeiten oder Teilzeit). Durch das fiktive "Teilen" des Einkommens wird die harte Steuerprogression des Besserverdienenden massiv abgemildert.</p>
+                     <div className={`p-2 rounded text-xs font-bold border mt-3 ${isMarried ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                         Status für diese Auswertung: {isMarried ? 'Splitting-Verfahren für Ehepaare ist AKTIVIERT.' : 'Grundtarif für Einzelveranlagung (Single) ist AKTIVIERT.'}
+                     </div>
+                  </div>
 
-                <div className="grid grid-cols-2 gap-8">
-                    <div>
-                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">3. Krankenversicherung der Rentner (KVdR)</h3>
-                       <p className="mb-4">Die KVdR ist keine eigenständige Kasse, sondern ein begehrter Versichertenstatus. Erreicht wird er über die "9/10-Regelung" (mind. 90 % der zweiten Erwerbslebenshälfte gesetzlich versichert). Der gravierende Vorteil: KVdR-Mitglieder zahlen KV/PV-Beiträge <strong>nur auf gesetzliche Renten und Betriebsrenten</strong>. Einkünfte aus Kapitalvermögen (ETFs, private Renten) oder Vermietung bleiben zu 100 % beitragsfrei.</p>
+                  <div className="break-inside-avoid mb-6">
+                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">3. Krankenversicherung der Rentner (KVdR)</h3>
+                     <p>Die KVdR ist keine eigenständige Kasse, sondern ein begehrter Versichertenstatus. Erreicht wird er über die "9/10-Regelung" (mind. 90 % der zweiten Erwerbslebenshälfte gesetzlich versichert). Der gravierende Vorteil: KVdR-Mitglieder zahlen KV/PV-Beiträge <strong>nur auf gesetzliche Renten und Betriebsrenten</strong>. Einkünfte aus Kapitalvermögen (ETFs, private Renten) oder Vermietung bleiben zu 100 % beitragsfrei.</p>
+                  </div>
 
-                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1 mt-6">4. Kohortenbesteuerung (Schicht 1)</h3>
-                       <p className="mb-4">Gemäß Alterseinkünftegesetz steigt die Steuerpflicht für gesetzliche Renten und Rürup-Renten sukzessive an. Wer 2026 in Rente geht, muss 84 % seiner ersten vollen Jahresrente versteuern. Die restlichen 16 % werden als <strong>absoluter Euro-Betrag auf Lebenszeit eingefroren</strong>. Die Konsequenz: Jede zukünftige gesetzliche Rentenerhöhung erhöht das zu versteuernde Einkommen unmittelbar zu 100 %.</p>
-                    </div>
+                  <div className="break-inside-avoid mb-6">
+                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">4. Kohortenbesteuerung (Schicht 1)</h3>
+                     <p>Gemäß Alterseinkünftegesetz steigt die Steuerpflicht für gesetzliche Renten und Rürup-Renten sukzessive an. Wer 2026 in Rente geht, muss 84 % seiner ersten vollen Jahresrente versteuern. Die restlichen 16 % werden als <strong>absoluter Euro-Betrag auf Lebenszeit eingefroren</strong>. Die Konsequenz: Jede zukünftige gesetzliche Rentenerhöhung erhöht das zu versteuernde Einkommen unmittelbar zu 100 %.</p>
+                  </div>
 
-                    <div>
-                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">5. Betriebsrenten & Doppelverbeitragung</h3>
-                       <p className="mb-4">Die betriebliche Altersvorsorge (bAV) mindert in der Erwerbsphase Steuern und Sozialabgaben. Im Alter dreht sich dies um: bAV-Renten sind voll steuerpflichtig. Gravierender ist die Sozialversicherungspflicht: Rentner müssen hierauf den <strong>vollen Kranken- und Pflegeversicherungsbeitrag (ca. 19 - 20 %)</strong> abführen (abzgl. eines kleinen Freibetrags). Dies ist die sogenannte Doppelverbeitragung.</p>
+                  <div className="break-inside-avoid mb-6">
+                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">5. Betriebsrenten & Doppelverbeitragung</h3>
+                     <p>Die betriebliche Altersvorsorge (bAV) mindert in der Erwerbsphase Steuern und Sozialabgaben. Im Alter dreht sich dies um: bAV-Renten sind voll steuerpflichtig. Gravierender ist die Sozialversicherungspflicht: Rentner müssen hierauf den <strong>vollen Kranken- und Pflegeversicherungsbeitrag (ca. 19 - 20 %)</strong> abführen (abzgl. eines kleinen Freibetrags). Dies ist die sogenannte Doppelverbeitragung.</p>
+                  </div>
 
-                       <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1 mt-6">6. Steuerprivilegien in Schicht 3</h3>
-                       <p className="mb-2"><strong>Private Leibrenten:</strong> Unterliegen nur der Ertragsanteilsbesteuerung nach § 22 EStG. Geht man mit 67 in Rente, rechnet das Finanzamt fiktiv nur ca. 17 % der Rente als steuerpflichtiges Einkommen an.</p>
-                       <p className="mb-2"><strong>Kapitalauszahlungen:</strong> Bei Laufzeiten über 12 Jahren und Auszahlung ab Alter 62 greift das <strong>Halbeinkünfteverfahren</strong>. 50 % des Gewinns sind steuerfrei, die andere Hälfte unterliegt dem persönlichen Steuersatz.</p>
-                       <p><strong>ETF-Depots:</strong> Realisierte Kursgewinne unterliegen der Abgeltungsteuer (25 % + Soli). Bei reinen Aktien-ETFs bleiben durch das Investmentsteuergesetz (Teilfreistellung) <strong>30 % aller Gewinne komplett steuerfrei</strong>.</p>
-                    </div>
-                </div>
-                <div className="mt-8 text-[10px] text-slate-400 text-center border-t border-slate-200 pt-4 font-semibold uppercase tracking-wider">
-                    Hinweis: Alle Berechnungen in diesem Dokument sind softwaregestützte Simulationen und ersetzen keine rechtsverbindliche Steuerberatung. Stand der Steuergesetzgebung: 2026.
-                </div>
-             </div>
-          )}
+                  <div className="break-inside-avoid mb-6">
+                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">6. Steuerprivilegien in Schicht 3</h3>
+                     <p className="mb-2"><strong>Private Leibrenten:</strong> Unterliegen nur der Ertragsanteilsbesteuerung nach § 22 EStG. Geht man mit 67 in Rente, rechnet das Finanzamt fiktiv nur ca. 17 % der Rente als steuerpflichtiges Einkommen an.</p>
+                     <p className="mb-2"><strong>Kapitalauszahlungen:</strong> Bei Laufzeiten über 12 Jahren und Auszahlung ab Alter 62 greift das <strong>Halbeinkünfteverfahren</strong>. 50 % des Gewinns sind steuerfrei, die andere Hälfte unterliegt dem persönlichen Steuersatz.</p>
+                     <p><strong>ETF-Depots:</strong> Realisierte Kursgewinne unterliegen der Abgeltungsteuer (25 % + Soli). Bei reinen Aktien-ETFs bleiben durch das Investmentsteuergesetz (Teilfreistellung) <strong>30 % aller Gewinne komplett steuerfrei</strong>.</p>
+                  </div>
+               </>
+            )}
+          </div>
+          <div className="mt-8 text-[10px] text-slate-400 text-center border-t border-slate-200 pt-4 font-semibold uppercase tracking-wider">
+              Hinweis: Alle Berechnungen in diesem Dokument sind softwaregestützte Simulationen und ersetzen keine rechtsverbindliche Steuerberatung. Stand der Steuergesetzgebung: 2026.
+          </div>
         </div>
       )}
 
