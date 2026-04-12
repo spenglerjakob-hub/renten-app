@@ -80,20 +80,20 @@ export default function App() {
   // --- STATE MANAGEMENT ---
   const [isMarried, setIsMarried] = useState(false); 
   const [showRealValue, setShowRealValue] = useState(false);
-  const [targetIncomeToday, setTargetIncomeToday] = useState(2000); 
+  const [targetIncomeToday, setTargetIncomeToday] = useState(3000); 
   const [hasChurchTax, setHasChurchTax] = useState(false);
   const [hasChildren, setHasChildren] = useState(true);
   const [kvStatus, setKvStatus] = useState('kvdr'); 
   const [pkvPremium, setPkvPremium] = useState(600);
 
   // Benchmark States für das Gehalt
-  const [currentNetIncome, setCurrentNetIncome] = useState(2500);
+  const [currentNetIncome, setCurrentNetIncome] = useState(3500);
   const [wageGrowthRate, setWageGrowthRate] = useState(2.0);
 
   // Person A
-  const [birthDateA, setBirthDateA] = useState('01.01.1989');
-  const [retDateA, setRetDateA] = useState('01.01.2056');
-  const [grvGrossA, setGrvGrossA] = useState(0);
+  const [birthDateA, setBirthDateA] = useState('01.01.1995');
+  const [retDateA, setRetDateA] = useState('01.01.2062');
+  const [grvGrossA, setGrvGrossA] = useState(2954);
   
   // Person B (Partner)
   const [birthDateB, setBirthDateB] = useState('01.01.1991');
@@ -104,7 +104,7 @@ export default function App() {
 
   // Indexierung & Makro
   const [inflationRate, setInflationRate] = useState(2.0);
-  const [taxIndexRate, setTaxIndexRate] = useState(1.5);
+  const [taxIndexRate, setTaxIndexRate] = useState(2.0);
   const [solutionSavingsReturn, setSolutionSavingsReturn] = useState(5.0);
   const [solutionSavingsDynamic, setSolutionSavingsDynamic] = useState(3.0);
 
@@ -279,14 +279,13 @@ export default function App() {
   };
 
   const loadDemoData = () => {
-    setBirthDateA('01.01.1991'); setBirthDateB('01.01.1993'); 
-    setRetDateA('01.01.2058'); setRetDateB('01.01.2060'); 
-    setGrvGrossA(1650); setGrvGrossB(800); setIsMarried(true); setKvStatus('kvdr'); setHasChurchTax(true);
+    setBirthDateA('01.01.1995'); setBirthDateB('01.01.1993'); 
+    setRetDateA('01.01.2062'); setRetDateB('01.01.2060'); 
+    setGrvGrossA(2954); setGrvGrossB(0); setIsMarried(false); setKvStatus('kvdr'); setHasChurchTax(false);
     setContracts([
-      { id: 1, layer: 1, type: 'basis', name: 'Rürup Rente (A)', gross: 300, owner: 'A' },
-      { id: 2, layer: 2, type: 'bav', name: 'bAV Direkt (A)', gross: 250, owner: 'A' },
-      { id: 3, layer: 2, type: 'riester', name: 'Fonds-Riester (B)', gross: 150, owner: 'B' },
-      { id: 8, layer: 3, type: 'etf', name: 'Gemeinsames ETF-Depot', capital: 45000, monthly: 350, returnAcc: 6.0, returnWith: 3.5, ter: 0.2, duration: 25, payoutStrategy: 'planer', owner: 'A' }
+      { id: 2, layer: 2, type: 'bav', name: 'Neuer Vertrag', gross: 27, owner: 'A', payoutStrategy: 'rent' },
+      { id: 3, layer: 2, type: 'riester', name: 'Neuer Vertrag', gross: 295, owner: 'A', payoutStrategy: 'rent' },
+      { id: 8, layer: 3, type: 'etf', name: 'Neuer Vertrag', capital: 18000, monthly: 550, returnAcc: 6.0, returnWith: 3.5, ter: 0.2, duration: 25, payoutStrategy: 'planer', owner: 'A' }
     ]);
   };
 
@@ -870,27 +869,39 @@ export default function App() {
     </div>
   );
 
+  // --- KASSENBON RENDER FUNKTION ---
   const renderBonContract = (c) => {
     const strategy = c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent');
     const isKapital = c.type === 'etf' || c.type.includes('Kapital');
-    const bruttoKapital = c.type === 'etf' ? c.totalCap : c.gross;
     
-    const headerColor = c.layer === 1 ? 'text-blue-900' : c.layer === 2 ? 'text-purple-900' : 'text-emerald-900';
+    // Sicherheit gegen leere Eingaben (damit kein NaN entsteht)
+    const bruttoKapital = Number(c.type === 'etf' ? c.totalCap : c.gross) || 0;
+    const nettoKapital = Number(c.netCapital) || 0;
+    const safeBrutto = isNaN(bruttoKapital) ? 0 : bruttoKapital;
+    const safeNetto = isNaN(nettoKapital) ? 0 : nettoKapital;
+
+    // Den genauen gewünschten Wortlaut aus den Screenshots nachbauen
+    let subtitle = '';
+    if (isKapital) {
+       if (strategy === 'rent') {
+           subtitle = `Brutto: ${formatResultCurrency(safeBrutto)} (Netto: ${formatResultCurrency(safeNetto)}) | Mtl. Entnahme`;
+       } else {
+           subtitle = `Kapital: ${formatResultCurrency(safeBrutto)} | ${strategy === 'planer' ? 'In Planer übertragen' : 'Ignoriert'}`;
+       }
+    } else {
+       subtitle = `Brutto: ${formatResultCurrency(Number(c.gross) || 0)}`;
+    }
 
     return (
       <div key={c.id} className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
         <div className="flex justify-between items-center mb-1">
-          <div className={`font-semibold text-sm ${headerColor}`}>{c.name} {isMarried ? `(${c.owner})` : ''}</div>
+          <div className="font-semibold text-sm text-blue-900">{c.name} {isMarried ? `(${c.owner})` : ''}</div>
           <div className={`font-bold text-base ${strategy !== 'rent' ? 'text-slate-400' : 'text-slate-800'}`}>
-            {strategy !== 'rent' ? '0 €' : renderBonVal(c.net)}
+            {strategy !== 'rent' ? '0 €' : renderBonVal(c.net || 0)}
           </div>
         </div>
         <div className="flex justify-between items-end text-[10px] text-slate-500">
-          <div>
-            {isKapital
-              ? `Brutto-Kapital: ${formatResultCurrency(bruttoKapital)} (Netto: ${formatResultCurrency(c.netCapital || 0)}) | ${strategy === 'planer' ? 'In Planer übertragen' : strategy === 'ignore' ? 'Ignoriert' : 'Mtl. Entnahme'}`
-              : `Brutto: ${formatResultCurrency(c.gross)}`}
-          </div>
+          <div>{subtitle}</div>
           {(c.kvpv_deduction > 0 || (c.tax || 0) > 0 || (c.kist || 0) > 0) && (
             <div className="text-rose-500 text-right leading-tight">
               {c.kvpv_deduction > 0 ? `KV/PV: ${formatResultCurrency(c.kvpv_deduction)} | ` : ''}
@@ -987,20 +998,20 @@ export default function App() {
                 <h3 className="font-bold text-slate-800 mb-2">Ihre Zusatz-Verträge & Depots</h3>
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
-                    <tr className="border-b-2 border-slate-200 text-slate-800">
-                      <th className="pb-2 font-bold w-20">Schicht</th>
-                      <th className="pb-2 font-bold w-28">Art</th>
-                      <th className="pb-2 font-bold">Name / Inhaber</th>
-                      <th className="pb-2 font-bold">Wert / Beitrag</th>
+                    <tr className="bg-slate-100 text-slate-800">
+                      <th className="p-3 font-bold w-20 border-b border-slate-200">Schicht</th>
+                      <th className="p-3 font-bold w-28 border-b border-slate-200">Art</th>
+                      <th className="p-3 font-bold border-b border-slate-200">Name / Inhaber</th>
+                      <th className="p-3 font-bold border-b border-slate-200">Wert / Beitrag</th>
                     </tr>
                   </thead>
                   <tbody className="text-slate-700">
                      {contracts.map(c => (
                         <tr key={c.id} className="border-b border-slate-100">
-                           <td className="py-2">Schicht {c.layer}</td>
-                           <td className="py-2 uppercase">{c.type.replace('prvKapital', 'Privat (Kapital)').replace('prvRente', 'Privat (Rente)').replace('bavKapital', 'bAV (Kapital)')}</td>
-                           <td className="py-2 font-medium">{c.name} {isMarried ? `(${c.owner})` : ''}</td>
-                           <td className="py-2 text-xs">
+                           <td className="p-3">Schicht {c.layer}</td>
+                           <td className="p-3 uppercase">{c.type.replace('prvKapital', 'Privat (Kapital)').replace('prvRente', 'Privat (Rente)').replace('bavKapital', 'bAV (Kapital)')}</td>
+                           <td className="p-3 font-medium">{c.name} {isMarried ? `(${c.owner})` : ''}</td>
+                           <td className="p-3 text-xs">
                               {c.type === 'etf' ? `Kapital heute: ${formatCurrency(c.capital)} | Sparrate: ${formatCurrency(c.monthly)}/M` : 
                                c.type.includes('Kapital') ? `Zielkapital: ${formatCurrency(c.gross)}` :
                                c.type === 'immobilie' ? `Kaltmiete: ${formatCurrency(c.gross)}/M` :
@@ -1028,7 +1039,7 @@ export default function App() {
               </div>
             )}
 
-            {/* PERSON DATA MAPPING (For handling Print view perfectly) */}
+            {/* PERSON DATA MAPPING */}
             {['A', 'B'].filter(p => p === 'A' || isMarried).map(p => (
               <div key={`person-data-${p}`} className={`${personTab === p ? 'block' : 'hidden'} print:block mb-4`}>
                 <h3 className="hidden print:block text-sm font-bold text-slate-700 mb-2 border-b border-slate-100 pb-1">Daten Person {p}</h3>
@@ -1300,7 +1311,7 @@ export default function App() {
             <button onClick={() => setRightView('verlauf')} className={`flex-1 py-2 rounded text-xs font-bold flex justify-center gap-2 ${rightView === 'verlauf' ? 'bg-white shadow' : 'text-slate-500'}`}><LineChartIcon className="w-4 h-4" /> Verlauf</button>
           </div>
 
-          {/* KASSENBON */}
+          {/* KASSENBON - EXAKT WIE GEWÜNSCHTES DESIGN */}
           <div className={`bg-white rounded-xl shadow-sm border p-6 print:block print:break-inside-avoid ${rightView === 'zusammensetzung' ? 'block' : 'hidden'}`}>
             <h2 className="text-sm font-bold mb-4 print:hidden">Ihr Haushalts-Netto im Jahr {calculations.baseRetYear}</h2>
             
@@ -1324,13 +1335,14 @@ export default function App() {
               </div>
             </div>
 
-            <div className="space-y-3">
-              <div className="border border-blue-100 rounded-lg print:border-slate-300">
-                <div className="flex justify-between p-3 bg-blue-50/50 cursor-pointer print:bg-slate-100" onClick={() => toggleSection('s1')}>
-                  <div className="font-bold text-sm text-blue-900">Schicht 1 (Basis)</div>
-                  <div className="font-bold">{renderBonVal(calculations.s1_net)}</div>
+            <div className="space-y-4">
+              
+              <div className="border border-blue-100 rounded-lg print:border-slate-300 overflow-hidden mb-3">
+                <div className="flex justify-between p-3 sm:p-4 bg-white cursor-pointer print:bg-white border-b border-blue-50" onClick={() => toggleSection('s1')}>
+                  <div className="font-bold text-sm sm:text-base text-blue-900">Schicht 1 (Basis)</div>
+                  <div className="font-bold text-sm sm:text-base">{renderBonVal(calculations.s1_net)}</div>
                 </div>
-                <div className={`p-3 bg-white text-xs border-t border-blue-100 space-y-2 ${expandedSections.s1 ? 'block' : 'hidden'} print:block print:space-y-0 print:border-t-0 print:p-0 print:mt-3`}>
+                <div className={`p-3 bg-white text-xs space-y-2 ${expandedSections.s1 ? 'block' : 'hidden'} print:block print:space-y-0 print:p-0 print:mt-2`}>
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
                     <div className="flex justify-between items-center mb-1">
                       <div className="font-semibold text-sm text-blue-900">Gesetzliche Rente (Haushalt)</div>
@@ -1345,30 +1357,30 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="border border-purple-100 rounded-lg print:border-slate-300">
-                <div className="flex justify-between p-3 bg-purple-50/50 cursor-pointer print:bg-slate-100" onClick={() => toggleSection('s2')}>
-                  <div className="font-bold text-sm text-purple-900">Schicht 2 (Zusatz)</div>
-                  <div className="font-bold">{renderBonVal(calculations.s2_net)}</div>
+              <div className="border border-purple-100 rounded-lg print:border-slate-300 overflow-hidden mb-3">
+                <div className="flex justify-between p-3 sm:p-4 bg-white cursor-pointer print:bg-white border-b border-purple-50" onClick={() => toggleSection('s2')}>
+                  <div className="font-bold text-sm sm:text-base text-purple-900">Schicht 2 (Zusatz)</div>
+                  <div className="font-bold text-sm sm:text-base">{renderBonVal(calculations.s2_net)}</div>
                 </div>
-                <div className={`p-3 bg-white text-xs border-t border-purple-100 space-y-2 ${expandedSections.s2 ? 'block' : 'hidden'} print:block print:space-y-0 print:border-t-0 print:p-0 print:mt-3`}>
+                <div className={`p-3 bg-white text-xs space-y-2 ${expandedSections.s2 ? 'block' : 'hidden'} print:block print:space-y-0 print:p-0 print:mt-2`}>
                    {calculations.contracts.filter(c=>c.layer===2).map(c => renderBonContract(c))}
                 </div>
               </div>
 
-              <div className="border border-emerald-100 rounded-lg print:border-slate-300">
-                <div className="flex justify-between p-3 bg-emerald-50/50 cursor-pointer print:bg-slate-100" onClick={() => toggleSection('s3')}>
-                  <div className="font-bold text-sm text-emerald-900">Schicht 3 (Privat)</div>
-                  <div className="font-bold">{renderBonVal(calculations.s3_net)}</div>
+              <div className="border border-emerald-100 rounded-lg print:border-slate-300 overflow-hidden mb-3">
+                <div className="flex justify-between p-3 sm:p-4 bg-white cursor-pointer print:bg-white border-b border-emerald-50" onClick={() => toggleSection('s3')}>
+                  <div className="font-bold text-sm sm:text-base text-emerald-900">Schicht 3 (Privat)</div>
+                  <div className="font-bold text-sm sm:text-base">{renderBonVal(calculations.s3_net)}</div>
                 </div>
-                <div className={`p-3 bg-white text-xs border-t border-emerald-100 space-y-2 ${expandedSections.s3 ? 'block' : 'hidden'} print:block print:space-y-0 print:border-t-0 print:p-0 print:mt-3`}>
+                <div className={`p-3 bg-white text-xs space-y-2 ${expandedSections.s3 ? 'block' : 'hidden'} print:block print:space-y-0 print:p-0 print:mt-2`}>
                   {calculations.contracts.filter(c=>c.layer===3).map(c => renderBonContract(c))}
                   {includePlanerInNet && (
-                    <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100 mb-2 break-inside-avoid">
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
                        <div className="flex justify-between items-center mb-1">
-                         <div className="font-semibold text-sm text-indigo-900">Planer Wunsch-Rente</div>
-                         <div className="font-bold text-base text-indigo-900">{renderBonVal(calculations.finalPlanerWithdrawal)}</div>
+                         <div className="font-semibold text-sm text-blue-900">Planer Wunsch-Rente</div>
+                         <div className="font-bold text-base text-slate-800">{renderBonVal(calculations.finalPlanerWithdrawal)}</div>
                        </div>
-                       <div className="flex justify-between items-end text-[10px] text-indigo-700/70">
+                       <div className="flex justify-between items-end text-[10px] text-slate-500">
                          <div>Brutto: {formatResultCurrency(calculations.finalPlanerWithdrawalGross)}</div>
                          {calculations.planerTax > 0 && <div className="text-rose-500 text-right leading-tight">Abgeltung: {formatResultCurrency(calculations.planerTax + (calculations.planerKist || 0))}</div>}
                        </div>
