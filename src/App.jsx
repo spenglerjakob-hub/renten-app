@@ -514,8 +514,9 @@ export default function App() {
         else s2_net += net;
       }
       else if (c.type === 'bavKapital') {
-        const taxFuenftel_today = (calculateESt(zvE_yearly_today + (c.gross / inflationFactor / 5), isMarried) - tax_today) * 5;
-        const taxFuenftel = taxFuenftel_today * inflationFactor;
+        // ACHTUNG: Hier auch taxInflationFactor statt inflationFactor für mehr Präzision nutzen
+        const taxFuenftel_today = (calculateESt(zvE_yearly_today + (c.gross / taxInflationFactor / 5), isMarried) - tax_today) * 5;
+        const taxFuenftel = taxFuenftel_today * taxInflationFactor;
         const kistFuenftel = taxFuenftel * kistRate;
         const monthlyBavGross = c.gross / 120;
         let monthlyKvPv = 0;
@@ -545,10 +546,17 @@ export default function App() {
         let currPremium = (c.monthlyPremium || 0) * 12;
         for (let i = 0; i < years; i++) { totalPremiums += currPremium; currPremium *= (1 + (c.dynamic || 0) / 100); }
         const profit = Math.max(0, c.gross - totalPremiums);
-        const taxHalb = profit * 0.5 * 0.85 * marginalTaxToday;
+        
+        // BUGFIX: Echte Progressionsberechnung statt pauschalem Grenzsteuersatz
+        const taxableProfit_today = (profit / taxInflationFactor) * 0.5 * 0.85; // 50% Halbeinkünfte + 15% Teilfreistellung
+        const taxHalb_today = calculateESt(zvE_yearly_today + taxableProfit_today, isMarried) - tax_today;
+        const taxHalb = Math.max(0, taxHalb_today * taxInflationFactor); // Wieder aufplustern mit Indexierung
         const kistHalb = taxHalb * kistRate;
+        
         const abgeltungRate = hasChurchTax ? 0.278186 : 0.26375;
-        const taxAbgeltung = profit * 0.85 * abgeltungRate;
+        const taxAbgeltung = profit * 0.85 * abgeltungRate; // 15% Teilfreistellung
+        
+        // Günstigerprüfung
         if ((taxHalb + kistHalb) < taxAbgeltung) { tax = taxHalb; kist = kistHalb; c.appliedTaxMethod = 'Halbeinkünfte'; } 
         else { tax = taxAbgeltung; kist = 0; c.appliedTaxMethod = 'Abgeltungsteuer'; }
         
@@ -726,6 +734,7 @@ export default function App() {
 
     return {
       currentAgeA, currentAgeB, retirementAgeA, retirementAgeB,
+      ertragsanteilRateA, ertragsanteilRateB,
       yearsToRetA, yearsToRetB, maxYearsToRet, targetIncomeFuture, baseRetYear,
       inflationFactor, incomeChartData, zvE_yearly: zvE_yearly_nominal, avgTaxRate, marginalTaxRate: marginalTaxToday, deductible_kvpv, 
       grvFutureGrossTotal, grvNet, grvKvpv, grvESt, grvKist, s1_net, s2_net, s3_net, contracts: finalizedContracts,
@@ -889,7 +898,8 @@ export default function App() {
            subtitle = `Kapital: ${formatResultCurrency(safeBrutto)} | ${strategy === 'planer' ? 'In Planer übertragen' : 'Ignoriert'}`;
        }
     } else {
-       subtitle = `Brutto: ${formatResultCurrency(Number(c.gross) || 0)}`;
+       const ertragsanteilText = c.type === 'prvRente' ? ` | Steuerpflichtig: ${Math.round((c.owner === 'B' && isMarried ? calculations.ertragsanteilRateB : calculations.ertragsanteilRateA) * 100)} %` : '';
+       subtitle = `Brutto: ${formatResultCurrency(Number(c.gross) || 0)}${ertragsanteilText}`;
     }
 
     return (
@@ -932,7 +942,7 @@ export default function App() {
               <span>Infl.:</span><select value={inflationRate} onChange={e => setInflationRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer"><option value={0}>0 %</option><option value={1.5}>1,5 %</option><option value={2.0}>2,0 %</option><option value={2.5}>2,5 %</option></select>
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 text-white shadow">
-              <span>Index.:</span><select value={taxIndexRate} onChange={e => setTaxIndexRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer"><option value={0}>0 %</option><option value={1.5}>1,5 %</option><option value={2.0}>2,0 %</option></select>
+              <span>Index.:</span><select value={taxIndexRate} onChange={e => setTaxIndexRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer"><option value={0}>0 %</option><option value={1.0}>1,0 %</option><option value={1.5}>1,5 %</option><option value={2.0}>2,0 %</option></select>
             </div>
             <div className="w-px bg-slate-700 mx-1"></div>
 
