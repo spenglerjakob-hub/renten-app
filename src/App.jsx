@@ -80,14 +80,14 @@ export default function App() {
   // --- STATE MANAGEMENT ---
   const [isMarried, setIsMarried] = useState(false); 
   const [showRealValue, setShowRealValue] = useState(false);
-  const [targetIncomeToday, setTargetIncomeToday] = useState(3000); 
+  const [targetIncomeToday, setTargetIncomeToday] = useState(2000); 
   const [hasChurchTax, setHasChurchTax] = useState(false);
   const [hasChildren, setHasChildren] = useState(true);
   const [kvStatus, setKvStatus] = useState('kvdr'); 
   const [pkvPremium, setPkvPremium] = useState(600);
 
   // Benchmark States für das Gehalt
-  const [currentNetIncome, setCurrentNetIncome] = useState(3500);
+  const [currentNetIncome, setCurrentNetIncome] = useState(2500);
   const [wageGrowthRate, setWageGrowthRate] = useState(2.0);
 
   // Person A
@@ -104,9 +104,10 @@ export default function App() {
 
   // Indexierung & Makro
   const [inflationRate, setInflationRate] = useState(2.0);
-  const [taxIndexRate, setTaxIndexRate] = useState(2.0);
+  const [taxIndexRate, setTaxIndexRate] = useState(1.0);
   const [solutionSavingsReturn, setSolutionSavingsReturn] = useState(5.0);
   const [solutionSavingsDynamic, setSolutionSavingsDynamic] = useState(3.0);
+  const [solutionEffektivkosten, setSolutionEffektivkosten] = useState(0.0);
 
   // Verträge
   const [contracts, setContracts] = useState([]);
@@ -211,7 +212,7 @@ export default function App() {
       birthDateA, retDateA, grvGrossA, 
       birthDateB, retDateB, grvGrossB, 
       grvIncreaseRate, inflationRate, taxIndexRate, 
-      solutionSavingsReturn, solutionSavingsDynamic, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet 
+      solutionSavingsReturn, solutionSavingsDynamic, solutionEffektivkosten, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet 
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -267,6 +268,7 @@ export default function App() {
         if (data.grvGrossA !== undefined) setGrvGrossA(data.grvGrossA);
         if (data.grvGrossB !== undefined) setGrvGrossB(data.grvGrossB);
         if (data.inflationRate) setInflationRate(data.inflationRate);
+        if (data.solutionEffektivkosten !== undefined) setSolutionEffektivkosten(data.solutionEffektivkosten);
         if (data.planerDuration !== undefined) setPlanerDuration(data.planerDuration);
         if (data.planerWithdrawal !== undefined && !data.planerDuration) setPlanerDuration(25);
         
@@ -285,7 +287,7 @@ export default function App() {
     setContracts([
       { id: 2, layer: 2, type: 'bav', name: 'Neuer Vertrag', gross: 27, owner: 'A', payoutStrategy: 'rent' },
       { id: 3, layer: 2, type: 'riester', name: 'Neuer Vertrag', gross: 295, owner: 'A', payoutStrategy: 'rent' },
-      { id: 8, layer: 3, type: 'etf', name: 'Neuer Vertrag', capital: 18000, monthly: 550, returnAcc: 6.0, returnWith: 3.5, ter: 0.2, duration: 25, payoutStrategy: 'planer', owner: 'A' }
+      { id: 8, layer: 3, type: 'etf', name: 'Neuer Vertrag', capital: 18000, monthly: 550, returnAcc: 6.0, returnWith: 2.0, ter: 0.2, duration: 25, payoutStrategy: 'planer', owner: 'A' }
     ]);
   };
 
@@ -306,7 +308,7 @@ export default function App() {
         if (c.id === id) {
             let updates = { type: newType, gross: c.gross || 0, payoutStrategy: 'rent' };
             if (newType === 'immobilie') { updates.costs = 20; updates.dynamic = 1.5; }
-            if (newType === 'etf') { updates.capital = 0; updates.monthly = 100; updates.returnAcc = 6.0; updates.returnWith = 3.0; updates.ter = 0.2; updates.duration = 25; updates.specialPayment = 0; updates.specialPaymentYear = new Date().getFullYear() + 10; updates.payoutStrategy = 'planer'; }
+            if (newType === 'etf') { updates.capital = 0; updates.monthly = 100; updates.returnAcc = 6.0; updates.returnWith = 2.0; updates.ter = 0.2; updates.duration = 25; updates.specialPayment = 0; updates.specialPaymentYear = new Date().getFullYear() + 10; updates.payoutStrategy = 'planer'; }
             return { ...c, ...updates };
         }
         return c;
@@ -406,7 +408,8 @@ export default function App() {
         if (kvStatus === 'freiwillig') incomeForKV = Number(c.gross);
       } 
       else if (c.type === 'bav') {
-        zvE_contribution = Number(c.gross); 
+        // Altverträge (§40b EStG) werden in der Auszahlungsphase privilegiert nur mit dem Ertragsanteil besteuert
+        zvE_contribution = c.isOldContract ? Number(c.gross) * cErtRate : Number(c.gross); 
         if (kvStatus === 'kvdr') {
           const bav_kv = Math.max(0, c.gross - bavFreibetragKV) * kvRateFull;
           const bav_pv = c.gross > bavFreibetragKV ? c.gross * pvRateFull : 0;
@@ -514,10 +517,6 @@ export default function App() {
         else s2_net += net;
       }
       else if (c.type === 'bavKapital') {
-        // ACHTUNG: Hier auch taxInflationFactor statt inflationFactor für mehr Präzision nutzen
-        const taxFuenftel_today = (calculateESt(zvE_yearly_today + (c.gross / taxInflationFactor / 5), isMarried) - tax_today) * 5;
-        const taxFuenftel = taxFuenftel_today * taxInflationFactor;
-        const kistFuenftel = taxFuenftel * kistRate;
         const monthlyBavGross = c.gross / 120;
         let monthlyKvPv = 0;
         if (kvStatus === 'kvdr') {
@@ -529,7 +528,17 @@ export default function App() {
           monthlyKvPv = anrechenbar * (kvRateFull + pvRateFull);
           remainingBBG -= anrechenbar;
         }
-        tax = taxFuenftel; kist = kistFuenftel;
+        
+        // Altvertrag (§40b): 100% steuerfrei, aber KV/PV fällt an!
+        if (c.isOldContract) {
+            tax = 0; kist = 0; c.appliedTaxMethod = 'Steuerfrei (Altvertrag)';
+        } else {
+            const taxFuenftel_today = (calculateESt(zvE_yearly_today + (c.gross / taxInflationFactor / 5), isMarried) - tax_today) * 5;
+            const taxFuenftel = taxFuenftel_today * taxInflationFactor;
+            const kistFuenftel = taxFuenftel * kistRate;
+            tax = taxFuenftel; kist = kistFuenftel;
+        }
+        
         c.kvpv_deduction = monthlyKvPv * 120;
         c.netCapital = Math.max(0, c.gross - tax - kist - c.kvpv_deduction);
         
@@ -547,18 +556,23 @@ export default function App() {
         for (let i = 0; i < years; i++) { totalPremiums += currPremium; currPremium *= (1 + (c.dynamic || 0) / 100); }
         const profit = Math.max(0, c.gross - totalPremiums);
         
-        // BUGFIX: Echte Progressionsberechnung statt pauschalem Grenzsteuersatz
-        const taxableProfit_today = (profit / taxInflationFactor) * 0.5 * 0.85; // 50% Halbeinkünfte + 15% Teilfreistellung
-        const taxHalb_today = calculateESt(zvE_yearly_today + taxableProfit_today, isMarried) - tax_today;
-        const taxHalb = Math.max(0, taxHalb_today * taxInflationFactor); // Wieder aufplustern mit Indexierung
-        const kistHalb = taxHalb * kistRate;
-        
-        const abgeltungRate = hasChurchTax ? 0.278186 : 0.26375;
-        const taxAbgeltung = profit * 0.85 * abgeltungRate; // 15% Teilfreistellung
-        
-        // Günstigerprüfung
-        if ((taxHalb + kistHalb) < taxAbgeltung) { tax = taxHalb; kist = kistHalb; c.appliedTaxMethod = 'Halbeinkünfte'; } 
-        else { tax = taxAbgeltung; kist = 0; c.appliedTaxMethod = 'Abgeltungsteuer'; }
+        if (c.isOldContract) {
+            // Altvertrag (Abschluss vor 2005): Komplett steuerfrei
+            tax = 0; kist = 0; c.appliedTaxMethod = 'Steuerfrei (Altvertrag)';
+        } else {
+            // BUGFIX: Echte Progressionsberechnung statt pauschalem Grenzsteuersatz
+            const taxableProfit_today = (profit / taxInflationFactor) * 0.5 * 0.85; // 50% Halbeinkünfte + 15% Teilfreistellung
+            const taxHalb_today = calculateESt(zvE_yearly_today + taxableProfit_today, isMarried) - tax_today;
+            const taxHalb = Math.max(0, taxHalb_today * taxInflationFactor); // Wieder aufplustern mit Indexierung
+            const kistHalb = taxHalb * kistRate;
+            
+            const abgeltungRate = hasChurchTax ? 0.278186 : 0.26375;
+            const taxAbgeltung = profit * 0.85 * abgeltungRate; // 15% Teilfreistellung
+            
+            // Günstigerprüfung
+            if ((taxHalb + kistHalb) < taxAbgeltung) { tax = taxHalb; kist = kistHalb; c.appliedTaxMethod = 'Halbeinkünfte'; } 
+            else { tax = taxAbgeltung; kist = 0; c.appliedTaxMethod = 'Abgeltungsteuer'; }
+        }
         
         let monthlyKvPv = 0;
         if (kvStatus === 'freiwillig') {
@@ -670,7 +684,8 @@ export default function App() {
     let requiredCapital = gap > 0 ? (r_ret > 0 ? gap * (1 - Math.pow(1 + r_ret, -n_ret)) / r_ret : gap * n_ret) : 0;
 
     const dyn = solutionSavingsDynamic / 100;
-    const r_m = (solutionSavingsReturn / 100) / 12;
+    const netSolutionReturn = Math.max(0, solutionSavingsReturn - (solutionEffektivkosten || 0));
+    const r_m = (netSolutionReturn / 100) / 12;
     let requiredSavings = 0;
     if (requiredCapital > 0 && maxYearsToRet > 0) {
       if (r_m > 0) {
@@ -687,7 +702,7 @@ export default function App() {
       }
     }
     
-    const lumpSumRequired = requiredCapital > 0 ? requiredCapital / Math.pow(1 + (solutionSavingsReturn/100), maxYearsToRet) : 0;
+    const lumpSumRequired = requiredCapital > 0 ? requiredCapital / Math.pow(1 + (netSolutionReturn/100), maxYearsToRet) : 0;
 
     // --- INCOME CHART DATA (Bar Chart) ---
     const incomeChartData = [];
@@ -746,7 +761,7 @@ export default function App() {
     birthDateA, retDateA, grvGrossA, birthDateB, retDateB, grvGrossB,
     targetIncomeToday, hasChildren, isMarried, kvStatus, pkvPremium, hasChurchTax, currentNetIncome, wageGrowthRate,
     grvIncreaseRate, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet,
-    inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic
+    inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic, solutionEffektivkosten
   ]);
 
   // SVG Helper
@@ -832,7 +847,7 @@ export default function App() {
           </div>
           <div className="grid grid-cols-4 gap-2">
             <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Ansp.</label><input type="number" step="0.1" value={c.returnAcc ?? 6} onChange={e => updateContract(c.id, 'returnAcc', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Entn.</label><input type="number" step="0.1" value={c.returnWith ?? 3} onChange={e => updateContract(c.id, 'returnWith', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Entn.</label><input type="number" step="0.1" value={c.returnWith ?? 2} onChange={e => updateContract(c.id, 'returnWith', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
             <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">TER (%)</label><input type="number" step="0.1" value={c.ter ?? 0.2} onChange={e => updateContract(c.id, 'ter', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
             <div><label className="block text-[10px] font-bold text-indigo-600 mb-1">Dauer Entn. (J)</label><input type="number" step="1" value={c.duration ?? 25} onChange={e => updateContract(c.id, 'duration', parseNum(e.target.value))} className="w-full border-2 border-indigo-300 rounded p-1.5 text-xs font-bold" /></div>
           </div>
@@ -874,7 +889,17 @@ export default function App() {
           </div>
         </div>
       )}
+      
       {c.type === 'immobilie' && <div className="flex items-center gap-2 pt-3 border-t"><input type="checkbox" checked={c.includeInNet !== false} onChange={e => updateContract(c.id, 'includeInNet', e.target.checked)} className="rounded text-emerald-600 w-3 h-3" /><label className="text-[10px] text-slate-600 font-medium">In Gesamt-Netto übernehmen</label></div>}
+
+      {(c.type === 'bav' || c.type === 'bavKapital' || c.type === 'prvRente' || c.type === 'prvKapital') && (
+        <div className="flex items-center gap-2 pt-3 mt-2 border-t border-slate-100">
+           <input type="checkbox" checked={!!c.isOldContract} onChange={e => updateContract(c.id, 'isOldContract', e.target.checked)} className="rounded text-indigo-600 w-3 h-3 cursor-pointer" id={`old-${c.id}`} />
+           <label htmlFor={`old-${c.id}`} className="text-[10px] text-slate-600 font-medium cursor-pointer">
+              Vertrag vor 2005 abgeschlossen (Steuerprivileg für Altverträge anwenden)
+           </label>
+        </div>
+      )}
     </div>
   );
 
@@ -898,14 +923,16 @@ export default function App() {
            subtitle = `Kapital: ${formatResultCurrency(safeBrutto)} | ${strategy === 'planer' ? 'In Planer übertragen' : 'Ignoriert'}`;
        }
     } else {
-       const ertragsanteilText = c.type === 'prvRente' ? ` | Steuerpflichtig: ${Math.round((c.owner === 'B' && isMarried ? calculations.ertragsanteilRateB : calculations.ertragsanteilRateA) * 100)} %` : '';
+       const ertragsanteilText = (c.type === 'prvRente' || (c.type === 'bav' && c.isOldContract)) ? ` | Steuerpflichtig: ${Math.round((c.owner === 'B' && isMarried ? calculations.ertragsanteilRateB : calculations.ertragsanteilRateA) * 100)} %` : '';
        subtitle = `Brutto: ${formatResultCurrency(Number(c.gross) || 0)}${ertragsanteilText}`;
     }
+    
+    const altvertragBadge = c.isOldContract ? <span className="text-[8px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-2 uppercase font-bold tracking-wider">Altvertrag</span> : null;
 
     return (
       <div key={c.id} className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
         <div className="flex justify-between items-center mb-1">
-          <div className="font-semibold text-sm text-blue-900">{c.name} {isMarried ? `(${c.owner})` : ''}</div>
+          <div className="font-semibold text-sm text-blue-900">{c.name} {isMarried ? `(${c.owner})` : ''} {altvertragBadge}</div>
           <div className={`font-bold text-base ${strategy !== 'rent' ? 'text-slate-400' : 'text-slate-800'}`}>
             {strategy !== 'rent' ? '0 €' : renderBonVal(c.net || 0)}
           </div>
@@ -981,7 +1008,7 @@ export default function App() {
       <main className="max-w-6xl mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 print:p-0 print:block">
         
         {/* PRINT ONLY: ZUSAMMENFASSUNG EINGABEN */}
-        <div className="hidden print:block mb-8 break-inside-avoid">
+        <div className="hidden print:block mb-8 print:break-after-page">
            <h2 className="text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-4 text-slate-800">1. Ihre Eingabedaten & Prämissen</h2>
            
            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6">
@@ -1253,7 +1280,7 @@ export default function App() {
         <div className="lg:col-span-6 xl:col-span-7 space-y-6 print:col-span-12">
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:mt-0">
-            <h2 className="hidden print:block col-span-1 sm:col-span-2 text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-4 text-slate-800 mt-4 break-inside-avoid">2. Ergebnis: Ihr Kassenbon im Rentenalter</h2>
+            <h2 className="hidden print:block col-span-1 sm:col-span-2 text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-4 text-slate-800 mt-4 print:mt-0 break-inside-avoid">2. Ergebnis: Ihr Kassenbon im Rentenalter</h2>
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
               <h3 className="text-sm font-semibold text-slate-500 mb-1">Haushalts-Bedarf im Jahr {calculations.baseRetYear}</h3>
               <div className="text-3xl font-bold">{renderBonVal(calculations.targetIncomeFuture)}</div>
@@ -1331,17 +1358,17 @@ export default function App() {
                 <span>Ziel-Erreichung</span>
                 <span>{calculations.gap > 0 && calculations.targetIncomeFuture > 0 ? `${((calculations.totalNetFuture / calculations.targetIncomeFuture) * 100).toFixed(1)} % erreicht` : 'Ziel erreicht / übertroffen'}</span>
               </div>
-              <div className="h-4 w-full bg-slate-100 rounded-full flex overflow-hidden shadow-inner border border-slate-200">
-                {(calculations.s1_net > 0) && <div style={{ width: `${(calculations.s1_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%` }} className="bg-blue-500 transition-all duration-500" title={`Schicht 1: ${formatCurrency(calculations.s1_net)}`}></div>}
-                {(calculations.s2_net > 0) && <div style={{ width: `${(calculations.s2_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%` }} className="bg-purple-500 transition-all duration-500" title={`Schicht 2: ${formatCurrency(calculations.s2_net)}`}></div>}
-                {(calculations.s3_net > 0) && <div style={{ width: `${(calculations.s3_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%` }} className="bg-emerald-500 transition-all duration-500" title={`Schicht 3: ${formatCurrency(calculations.s3_net)}`}></div>}
-                {(calculations.gap > 0) && <div style={{ width: `${(calculations.gap / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%` }} className="bg-white transition-all duration-500" title={`Lücke: ${formatCurrency(calculations.gap)}`}></div>}
+              <div className="h-4 w-full bg-slate-100 rounded-full flex overflow-hidden shadow-inner border border-slate-200" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}>
+                {(calculations.s1_net > 0) && <div style={{ width: `${(calculations.s1_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-blue-500 transition-all duration-500" title={`Schicht 1: ${formatCurrency(calculations.s1_net)}`}></div>}
+                {(calculations.s2_net > 0) && <div style={{ width: `${(calculations.s2_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-purple-500 transition-all duration-500" title={`Schicht 2: ${formatCurrency(calculations.s2_net)}`}></div>}
+                {(calculations.s3_net > 0) && <div style={{ width: `${(calculations.s3_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-emerald-500 transition-all duration-500" title={`Schicht 3: ${formatCurrency(calculations.s3_net)}`}></div>}
+                {(calculations.gap > 0) && <div style={{ width: `${(calculations.gap / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-white transition-all duration-500" title={`Lücke: ${formatCurrency(calculations.gap)}`}></div>}
               </div>
               <div className="flex gap-3 mt-2 text-[9px] font-semibold text-slate-500 flex-wrap">
-                <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500"></span> Schicht 1</div>
-                <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500"></span> Schicht 2</div>
-                <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> Schicht 3</div>
-                {calculations.gap > 0 && <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-white border border-slate-300"></span> Lücke</div>}
+                <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></span> Schicht 1</div>
+                <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></span> Schicht 2</div>
+                <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></span> Schicht 3</div>
+                {calculations.gap > 0 && <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-white border border-slate-300" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></span> Lücke</div>}
               </div>
             </div>
 
@@ -1522,13 +1549,17 @@ export default function App() {
                       </div>
 
                       <div className="flex gap-4 pt-4 border-t border-slate-800 print:border-slate-200 mt-2">
-                           <div>
-                               <label className="block text-[9px] text-slate-400 uppercase mb-1">Annahme Rendite</label>
-                               <select value={solutionSavingsReturn} onChange={e => setSolutionSavingsReturn(Number(e.target.value))} className="bg-slate-800 text-xs text-white p-1 rounded print:bg-white print:text-black print:border"><option value={4}>4.0 %</option><option value={5}>5.0 %</option><option value={6}>6.0 %</option><option value={7}>7.0 %</option></select>
+                           <div className="flex-1">
+                               <label className="block text-[9px] text-slate-400 uppercase mb-1">Rendite p.a.</label>
+                               <select value={solutionSavingsReturn} onChange={e => setSolutionSavingsReturn(Number(e.target.value))} className="w-full bg-slate-800 text-xs text-white p-1.5 rounded print:bg-white print:text-black print:border outline-none focus:ring-1 focus:ring-indigo-500"><option value={4}>4.0 %</option><option value={5}>5.0 %</option><option value={6}>6.0 %</option><option value={7}>7.0 %</option><option value={8}>8.0 %</option><option value={9}>9.0 %</option></select>
                            </div>
-                           <div>
-                               <label className="block text-[9px] text-slate-400 uppercase mb-1">Dynamik Sparrate</label>
-                               <select value={solutionSavingsDynamic} onChange={e => setSolutionSavingsDynamic(Number(e.target.value))} className="bg-slate-800 text-xs text-white p-1 rounded print:bg-white print:text-black print:border"><option value={0}>0.0 %</option><option value={1.5}>1.5 %</option><option value={3}>3.0 %</option><option value={5}>5.0 %</option></select>
+                           <div className="flex-1">
+                               <label className="block text-[9px] text-slate-400 uppercase mb-1" title="Mindert Ihre angenommene Rendite p.a.">Effektivkosten %</label>
+                               <input type="number" step="0.1" value={solutionEffektivkosten ?? ''} onChange={e => setSolutionEffektivkosten(parseNum(e.target.value))} className="w-full bg-slate-800 text-xs text-white p-1.5 rounded print:bg-white print:text-black print:border outline-none focus:ring-1 focus:ring-indigo-500 placeholder-slate-500" placeholder="z.B. 0.2" />
+                           </div>
+                           <div className="flex-1">
+                               <label className="block text-[9px] text-slate-400 uppercase mb-1">Dyn. Sparrate</label>
+                               <select value={solutionSavingsDynamic} onChange={e => setSolutionSavingsDynamic(Number(e.target.value))} className="w-full bg-slate-800 text-xs text-white p-1.5 rounded print:bg-white print:text-black print:border outline-none focus:ring-1 focus:ring-indigo-500"><option value={0}>0.0 %</option><option value={1.5}>1.5 %</option><option value={3}>3.0 %</option><option value={5}>5.0 %</option></select>
                            </div>
                       </div>
                   </div>
