@@ -82,7 +82,7 @@ export default function App() {
   const [showRealValue, setShowRealValue] = useState(false);
   const [targetIncomeToday, setTargetIncomeToday] = useState(2000); 
   const [hasChurchTax, setHasChurchTax] = useState(false);
-  const [hasChildren, setHasChildren] = useState(true);
+  const [hasChildren, setHasChildren] = useState(false);
   const [kvStatus, setKvStatus] = useState('kvdr'); 
   const [pkvPremium, setPkvPremium] = useState(600);
 
@@ -93,21 +93,20 @@ export default function App() {
   // Person A
   const [birthDateA, setBirthDateA] = useState('01.01.1995');
   const [retDateA, setRetDateA] = useState('01.01.2062');
-  const [grvGrossA, setGrvGrossA] = useState(2954);
+  const [grvGrossA, setGrvGrossA] = useState(0);
   
   // Person B (Partner)
   const [birthDateB, setBirthDateB] = useState('01.01.1991');
   const [retDateB, setRetDateB] = useState('01.01.2058');
   const [grvGrossB, setGrvGrossB] = useState(0);
 
-  const [grvIncreaseRate, setGrvIncreaseRate] = useState(1.5);
+  const [grvIncreaseRate, setGrvIncreaseRate] = useState(0);
 
   // Indexierung & Makro
   const [inflationRate, setInflationRate] = useState(2.0);
   const [taxIndexRate, setTaxIndexRate] = useState(1.0);
   const [solutionSavingsReturn, setSolutionSavingsReturn] = useState(5.0);
   const [solutionSavingsDynamic, setSolutionSavingsDynamic] = useState(3.0);
-  const [solutionEffektivkosten, setSolutionEffektivkosten] = useState(0.0);
 
   // Verträge
   const [contracts, setContracts] = useState([]);
@@ -120,6 +119,7 @@ export default function App() {
   const [hoveredData, setHoveredData] = useState(null); 
   const [showTaxInfo, setShowTaxInfo] = useState(false); 
   const [showBenchmark, setShowBenchmark] = useState(false);
+  const [showOptimizer, setShowOptimizer] = useState(false);
   const [printExplanationMode, setPrintExplanationMode] = useState('short'); 
   const [manualChartStart, setManualChartStart] = useState(null); 
 
@@ -212,7 +212,7 @@ export default function App() {
       birthDateA, retDateA, grvGrossA, 
       birthDateB, retDateB, grvGrossB, 
       grvIncreaseRate, inflationRate, taxIndexRate, 
-      solutionSavingsReturn, solutionSavingsDynamic, solutionEffektivkosten, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet 
+      solutionSavingsReturn, solutionSavingsDynamic, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet 
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -264,11 +264,14 @@ export default function App() {
         if (data.targetIncomeToday) setTargetIncomeToday(data.targetIncomeToday);
         if (data.currentNetIncome) setCurrentNetIncome(data.currentNetIncome);
         if (data.wageGrowthRate !== undefined) setWageGrowthRate(data.wageGrowthRate);
+        if (data.hasChildren !== undefined) setHasChildren(data.hasChildren);
         if (data.contracts) setContracts(data.contracts);
         if (data.grvGrossA !== undefined) setGrvGrossA(data.grvGrossA);
         if (data.grvGrossB !== undefined) setGrvGrossB(data.grvGrossB);
+        if (data.grvIncreaseRate !== undefined) setGrvIncreaseRate(data.grvIncreaseRate);
         if (data.inflationRate) setInflationRate(data.inflationRate);
-        if (data.solutionEffektivkosten !== undefined) setSolutionEffektivkosten(data.solutionEffektivkosten);
+        if (data.solutionSavingsReturn !== undefined) setSolutionSavingsReturn(data.solutionSavingsReturn);
+        if (data.solutionSavingsDynamic !== undefined) setSolutionSavingsDynamic(data.solutionSavingsDynamic);
         if (data.planerDuration !== undefined) setPlanerDuration(data.planerDuration);
         if (data.planerWithdrawal !== undefined && !data.planerDuration) setPlanerDuration(25);
         
@@ -283,7 +286,7 @@ export default function App() {
   const loadDemoData = () => {
     setBirthDateA('01.01.1995'); setBirthDateB('01.01.1993'); 
     setRetDateA('01.01.2062'); setRetDateB('01.01.2060'); 
-    setGrvGrossA(2954); setGrvGrossB(0); setIsMarried(false); setKvStatus('kvdr'); setHasChurchTax(false);
+    setGrvGrossA(2954); setGrvGrossB(0); setIsMarried(false); setKvStatus('kvdr'); setHasChurchTax(false); setHasChildren(true); setGrvIncreaseRate(1.5);
     setContracts([
       { id: 2, layer: 2, type: 'bav', name: 'Neuer Vertrag', gross: 27, owner: 'A', payoutStrategy: 'rent' },
       { id: 3, layer: 2, type: 'riester', name: 'Neuer Vertrag', gross: 295, owner: 'A', payoutStrategy: 'rent' },
@@ -684,7 +687,7 @@ export default function App() {
     let requiredCapital = gap > 0 ? (r_ret > 0 ? gap * (1 - Math.pow(1 + r_ret, -n_ret)) / r_ret : gap * n_ret) : 0;
 
     const dyn = solutionSavingsDynamic / 100;
-    const netSolutionReturn = Math.max(0, solutionSavingsReturn - (solutionEffektivkosten || 0));
+    const netSolutionReturn = Math.max(0, solutionSavingsReturn);
     const r_m = (netSolutionReturn / 100) / 12;
     let requiredSavings = 0;
     if (requiredCapital > 0 && maxYearsToRet > 0) {
@@ -761,7 +764,7 @@ export default function App() {
     birthDateA, retDateA, grvGrossA, birthDateB, retDateB, grvGrossB,
     targetIncomeToday, hasChildren, isMarried, kvStatus, pkvPremium, hasChurchTax, currentNetIncome, wageGrowthRate,
     grvIncreaseRate, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet,
-    inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic, solutionEffektivkosten
+    inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic
   ]);
 
   // SVG Helper
@@ -1272,7 +1275,6 @@ export default function App() {
               </div>
 
             </div>
-            <div className="p-4 bg-white border-t print:hidden"><button onClick={loadDemoData} className="w-full border border-dashed rounded p-2 text-sm bg-blue-50 text-blue-700">Demo-Daten laden</button></div>
           </div>
         </div>
 
@@ -1529,40 +1531,52 @@ export default function App() {
           </div>
 
           {/* LÖSUNGS-RECHNER & OPTIMIZER */}
-          <div className="bg-slate-900 rounded-xl p-6 border border-slate-800 text-white print:bg-white print:text-slate-800 print:border-slate-300 print:break-inside-avoid">
-              <h3 className="text-sm font-bold text-indigo-400 mb-4 flex items-center gap-2 print:text-indigo-700">
-                  <Activity className="w-5 h-5" /> Smart Optimizer: Rentenlücke schließen
-              </h3>
-              {calculations.gap <= 0 ? (
-                  <div className="text-emerald-400 font-medium">Glückwunsch! Ihr Haushaltsbedarf ist vollständig gedeckt.</div>
-              ) : (
-                  <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 print:bg-slate-50 print:border-slate-200">
-                            <div className="text-xs text-slate-400">Benötigtes Ziel-Kapital</div>
-                            <div className="text-2xl font-bold text-emerald-400">{formatResultCurrency(calculations.requiredCapital)}</div>
-                        </div>
-                        <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 print:bg-slate-50 print:border-slate-200">
-                            <div className="text-xs text-slate-400">Mtl. Start-Sparrate (heute)</div>
-                            <div className="text-2xl font-bold text-white print:text-slate-800">{formatCurrency(calculations.requiredSavings)}</div>
-                        </div>
-                      </div>
+          <div className="bg-slate-900 rounded-xl border border-slate-800 text-white print:bg-white print:text-slate-800 print:border-slate-300 print:break-inside-avoid overflow-hidden">
+              <button onClick={() => setShowOptimizer(!showOptimizer)} className="w-full p-6 flex justify-between items-center hover:bg-slate-800 transition-colors print:bg-slate-50">
+                  <h3 className="text-sm font-bold text-indigo-400 flex items-center gap-2 print:text-indigo-700">
+                      <Activity className="w-5 h-5" /> Smart Optimizer: Rentenlücke schließen
+                  </h3>
+                  {showOptimizer ? <ChevronUp className="w-5 h-5 text-slate-400 print:text-slate-500"/> : <ChevronDown className="w-5 h-5 text-slate-400 print:text-slate-500"/>}
+              </button>
+              
+              {showOptimizer && (
+                <div className="px-6 pb-6 pt-2 border-t border-slate-800 print:border-slate-200">
+                  {calculations.gap <= 0 ? (
+                      <div className="text-emerald-400 font-medium">Glückwunsch! Ihr Haushaltsbedarf ist vollständig gedeckt.</div>
+                  ) : (
+                      <div className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 print:bg-slate-50 print:border-slate-200">
+                                <div className="text-xs text-slate-400">Benötigtes Ziel-Kapital</div>
+                                <div className="text-2xl font-bold text-emerald-400">{formatResultCurrency(calculations.requiredCapital)}</div>
+                            </div>
+                            <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 print:bg-slate-50 print:border-slate-200">
+                                <div className="text-xs text-slate-400">Mtl. Start-Sparrate (heute)</div>
+                                <div className="text-2xl font-bold text-white print:text-slate-800">{formatCurrency(calculations.requiredSavings)}</div>
+                            </div>
+                          </div>
 
-                      <div className="flex gap-4 pt-4 border-t border-slate-800 print:border-slate-200 mt-2">
-                           <div className="flex-1">
-                               <label className="block text-[9px] text-slate-400 uppercase mb-1">Rendite p.a.</label>
-                               <select value={solutionSavingsReturn} onChange={e => setSolutionSavingsReturn(Number(e.target.value))} className="w-full bg-slate-800 text-xs text-white p-1.5 rounded print:bg-white print:text-black print:border outline-none focus:ring-1 focus:ring-indigo-500"><option value={4}>4.0 %</option><option value={5}>5.0 %</option><option value={6}>6.0 %</option><option value={7}>7.0 %</option><option value={8}>8.0 %</option><option value={9}>9.0 %</option></select>
-                           </div>
-                           <div className="flex-1">
-                               <label className="block text-[9px] text-slate-400 uppercase mb-1" title="Mindert Ihre angenommene Rendite p.a.">Effektivkosten %</label>
-                               <input type="number" step="0.1" value={solutionEffektivkosten ?? ''} onChange={e => setSolutionEffektivkosten(parseNum(e.target.value))} className="w-full bg-slate-800 text-xs text-white p-1.5 rounded print:bg-white print:text-black print:border outline-none focus:ring-1 focus:ring-indigo-500 placeholder-slate-500" placeholder="z.B. 0.2" />
-                           </div>
-                           <div className="flex-1">
-                               <label className="block text-[9px] text-slate-400 uppercase mb-1">Dyn. Sparrate</label>
-                               <select value={solutionSavingsDynamic} onChange={e => setSolutionSavingsDynamic(Number(e.target.value))} className="w-full bg-slate-800 text-xs text-white p-1.5 rounded print:bg-white print:text-black print:border outline-none focus:ring-1 focus:ring-indigo-500"><option value={0}>0.0 %</option><option value={1.5}>1.5 %</option><option value={3}>3.0 %</option><option value={5}>5.0 %</option></select>
-                           </div>
+                          <div className="flex gap-4 pt-4 border-t border-slate-800 print:border-slate-200 mt-2">
+                               <div className="flex-1">
+                                   <label className="block text-[9px] text-slate-400 uppercase mb-1">Rendite p.a. (%)</label>
+                                   <input type="number" step="0.01" value={solutionSavingsReturn ?? ''} onChange={e => setSolutionSavingsReturn(parseNum(e.target.value))} className="w-full bg-slate-800 text-xs text-white p-1.5 rounded print:bg-white print:text-black print:border outline-none focus:ring-1 focus:ring-indigo-500 placeholder-slate-500" placeholder="z.B. 5.5" />
+                               </div>
+                               <div className="flex-1">
+                                   <label className="block text-[9px] text-slate-400 uppercase mb-1">Dyn. Sparrate</label>
+                                   <select value={solutionSavingsDynamic} onChange={e => setSolutionSavingsDynamic(Number(e.target.value))} className="w-full bg-slate-800 text-xs text-white p-1.5 rounded print:bg-white print:text-black print:border outline-none focus:ring-1 focus:ring-indigo-500">
+                                       {[0, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10].map(v => <option key={v} value={v}>{v.toFixed(1)} %</option>)}
+                                   </select>
+                                   {solutionSavingsDynamic > 0 && calculations.requiredSavings > 0 && (
+                                       <div className="text-[9px] text-slate-400 mt-1.5 leading-tight">
+                                           Letzte Rate (vor Rente):<br/>
+                                           <span className="font-bold text-slate-300 print:text-slate-600">{formatCurrency(calculations.requiredSavings * Math.pow(1 + solutionSavingsDynamic / 100, Math.max(0, Math.floor(calculations.maxYearsToRet) - 1)))}</span>
+                                       </div>
+                                   )}
+                               </div>
+                          </div>
                       </div>
-                  </div>
+                  )}
+                </div>
               )}
           </div>
 
