@@ -4,7 +4,7 @@ import {
   CheckCircle, ChevronDown, ChevronUp, ShieldAlert, PiggyBank, 
   Briefcase, PlusCircle, Trash, Users, User, Info, Coins, Clock, Infinity as InfinityIcon, Wallet, Activity,
   LineChart as LineChartIcon, List, Download, Home, Save, FolderOpen, Zap,
-  Eye, Compass, Target, Search
+  Eye, Compass, Target, Search, Percent, SearchCheck, ArrowRight
 } from 'lucide-react';
 
 // Helper für Input-Zahlen: Lässt leere Strings zu, damit man Nullen (besonders am Handy) problemlos löschen kann
@@ -124,6 +124,9 @@ export default function App() {
   const [printExplanationMode, setPrintExplanationMode] = useState('short'); 
   const [manualChartStart, setManualChartStart] = useState(null); 
 
+  // --- VERTRAGS-TÜV (PROFITABILITÄTS-CHECK) STATES ---
+  const [tuevItems, setTuevItems] = useState([]);
+
   // --- RENTEN-SCHÄTZER STATES & LOGIK ---
   const [estimatorPerson, setEstimatorPerson] = useState(null);
   const [estimatorSalary, setEstimatorSalary] = useState(50000);
@@ -224,7 +227,8 @@ export default function App() {
       birthDateA, retDateA, grvGrossA, 
       birthDateB, retDateB, grvGrossB, 
       grvIncreaseRate, inflationRate, taxIndexRate, 
-      solutionSavingsReturn, solutionSavingsDynamic, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet 
+      solutionSavingsReturn, solutionSavingsDynamic, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet,
+      tuevItems
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -288,6 +292,9 @@ export default function App() {
         if (data.solutionSavingsDynamic !== undefined) setSolutionSavingsDynamic(data.solutionSavingsDynamic);
         if (data.planerDuration !== undefined) setPlanerDuration(data.planerDuration);
         if (data.planerWithdrawal !== undefined && !data.planerDuration) setPlanerDuration(25);
+        
+        // TÜV Daten laden (falls vorhanden)
+        if (data.tuevItems !== undefined) setTuevItems(data.tuevItems);
         
         alert("Profil erfolgreich geladen!");
       } catch (err) {
@@ -868,6 +875,160 @@ export default function App() {
     inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic
   ]);
 
+  // --- TÜV BERECHNUNGSLOGIK (Multi-Contract Profitabilitäts-Check) ---
+  const addTuevItem = (contractId) => {
+      const c = contracts.find(x => x.id === parseInt(contractId));
+      if (!c) return;
+      const currentYear = new Date().getFullYear();
+      const newItem = {
+          id: Date.now(),
+          contractId: c.id,
+          grossMonthly: c.monthlyPremium || c.monthly || 100,
+          subsidyBav: 50,
+          subsidyRiester: 175,
+          startDate: `01.01.${currentYear}`,
+          lifeExpectancy: 85
+      };
+      setTuevItems(prev => [...prev, newItem]);
+  };
+
+  const updateTuevItem = (id, field, value) => {
+      setTuevItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
+  };
+
+  const removeTuevItem = (id) => {
+      setTuevItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  const tuevData = useMemo(() => {
+     // 1. Automatische Ableitung der heutigen Steuern & Abgaben
+     // Verbesserte Heuristik: Singles ca. 65% Nettoquote, Verheiratete (Klasse 3) ca. 75%
+     const derivedGrossToday = isMarried ? currentNetIncome / 0.75 : currentNetIncome / 0.65;
+     const zvEToday = derivedGrossToday * 12 * 0.8; 
+     const taxTodayYear = calculateESt(zvEToday, isMarried);
+     
+     // Grenzsteuersatz berechnet die Belastung auf genau die nächsten 100€
+     const marginalTaxNow = (calculateESt(zvEToday + 100, isMarried) - taxTodayYear) / 100;
+     
+     // GENAUERE SV-BERECHNUNG (Berücksichtigung der Beitragsbemessungsgrenzen 2026)
+     const BBG_KV_monthly = 5812.50; 
+     const BBG_RV_monthly = 7550.00; 
+     let svNow = 0;
+     if (derivedGrossToday < BBG_KV_monthly) svNow = 0.20; // Volle SV-Ersparnis (KV/PV + RV/AV)
+     else if (derivedGrossToday < BBG_RV_monthly) svNow = 0.106; // Nur RV/AV Ersparnis (~10,6%), da über KV-BBG
+     else svNow = 0.0; // Über allen Grenzen = keine SV-Ersparnis mehr
+
+     const taxRetirement = calculations.marginalTaxRate;
+
+     const evaluatedItems = tuevItems.map(item => {
+         const selectedC = contracts.find(c => c.id === item.contractId);
+         const calcC = calculations.contracts.find(c => c.id === item.contractId);
+         
+         if (!selectedC || !calcC) return { ...item, invalid: true };
+
+         const cType = selectedC.type;
+         const isKapital = cType.includes('Kapital') || cType === 'etf';
+         const payoutGross = isKapital ? (cType === 'etf' ? calcC.totalCap : Number(selectedC.gross)) : Number(selectedC.gross);
+
+         const cRetDate = selectedC.owner === 'B' && isMarried ? retDateB : retDateA;
+         const cRetAge = selectedC.owner === 'B' && isMarried ? calculations.retirementAgeB : calculations.retirementAgeA;
+         
+         const safeStartDate = item.startDate || `01.01.${new Date().getFullYear()}`;
+         const safeLifeExpectancy = item.lifeExpectancy || 85;
+         
+         const yearsAcc = Math.max(1, diffInYears(safeStartDate, cRetDate));
+         const statutoryYears = Math.max(1, safeLifeExpectancy - cRetAge);
+
+         let agZuschuss = 0;
+         let zulagenMonatlich = 0;
+         let steuerErsparnis = 0;
+         let svErsparnis = 0;
+         let echterNettoAufwand = 0;
+
+         // --- ANSPARPHASE ---
+         if (cType.includes('bav')) {
+             agZuschuss = Math.min(item.grossMonthly, item.subsidyBav || 0);
+             const anBrutto = item.grossMonthly - agZuschuss;
+             steuerErsparnis = anBrutto * marginalTaxNow;
+             svErsparnis = anBrutto * svNow;
+             echterNettoAufwand = Math.max(0, anBrutto - steuerErsparnis - svErsparnis);
+         } else if (cType === 'riester') {
+             zulagenMonatlich = item.subsidyRiester / 12;
+             const maxSteuerVorteil = item.grossMonthly * marginalTaxNow;
+             steuerErsparnis = Math.max(0, maxSteuerVorteil - zulagenMonatlich);
+             const anBrutto = item.grossMonthly - zulagenMonatlich;
+             echterNettoAufwand = Math.max(0, anBrutto - steuerErsparnis);
+         } else if (cType === 'basis') {
+             steuerErsparnis = item.grossMonthly * marginalTaxNow;
+             echterNettoAufwand = Math.max(0, item.grossMonthly - steuerErsparnis);
+         } else {
+             echterNettoAufwand = item.grossMonthly; 
+         }
+
+         const summeNettoEinzahlung = echterNettoAufwand * 12 * yearsAcc;
+
+         // --- AUSZAHLUNGSPHASE (100% SYNC MIT HAUPT-ENGINE) ---
+         let kvPvAbzug = 0;
+         let steuerAbzug = 0;
+         let echteNettoRente = 0;
+         let echteNettoKapital = 0;
+         let summeNettoAuszahlung = 0;
+
+         if (isKapital) {
+             // Kapitalauszahlung: Nutze direkt den exakten Netto-Kapitalwert aus der Main-Engine
+             echteNettoKapital = calcC.netCapital || 0;
+             kvPvAbzug = calcC.kvpv_deduction || 0;
+             steuerAbzug = (calcC.tax || 0) + (calcC.kist || 0);
+             summeNettoAuszahlung = echteNettoKapital;
+         } else {
+             // Leibrente: Exakte Übernahme der monatlichen Netto-Werte aus der Haupt-Steuer-Engine!
+             kvPvAbzug = calcC.kvpv_deduction || 0;
+             steuerAbzug = (calcC.tax || 0) + (calcC.kist || 0);
+             echteNettoRente = calcC.net || 0;
+             summeNettoAuszahlung = echteNettoRente * 12 * statutoryYears;
+         }
+
+         const amortisationsJahre = summeNettoEinzahlung > 0 && summeNettoAuszahlung > 0 
+              ? (isKapital ? 0 : (summeNettoEinzahlung / (echteNettoRente * 12))) 
+              : 0;
+         const nettoHebel = summeNettoEinzahlung > 0 ? (summeNettoAuszahlung / summeNettoEinzahlung) : 0;
+         const echterNettoGewinn = summeNettoAuszahlung - summeNettoEinzahlung;
+
+         // Iterative Berechnung des Internen Zinsfußes (IRR)
+         let irr = 0;
+         if (summeNettoEinzahlung > 0 && summeNettoAuszahlung > 0 && payoutGross > 0) {
+             let minRate = -0.1;
+             let maxRate = 0.2;
+             for (let i = 0; i < 40; i++) {
+                 irr = (minRate + maxRate) / 2;
+                 let npv = 0;
+                 for (let t = 1; t <= yearsAcc; t++) {
+                     npv -= (echterNettoAufwand * 12) / Math.pow(1 + irr, t);
+                 }
+                 if (isKapital) {
+                     npv += summeNettoAuszahlung / Math.pow(1 + irr, yearsAcc);
+                 } else {
+                     for (let t = yearsAcc + 1; t <= yearsAcc + statutoryYears; t++) {
+                         npv += (echteNettoRente * 12) / Math.pow(1 + irr, t);
+                     }
+                 }
+                 if (npv > 0) minRate = irr;
+                 else maxRate = irr;
+             }
+         }
+
+         return {
+             ...item, cType, payoutGross, isKapital, name: selectedC.name, layer: selectedC.layer,
+             yearsAcc, statutoryYears, safeStartDate, safeLifeExpectancy,
+             agZuschuss, zulagenMonatlich, steuerErsparnis, svErsparnis, echterNettoAufwand, summeNettoEinzahlung,
+             kvPvAbzug, steuerAbzug, echteNettoRente, echteNettoKapital, summeNettoAuszahlung,
+             amortisationsJahre, nettoHebel, irr: irr * 100, echterNettoGewinn
+         };
+     });
+
+     return { marginalTaxNow, svNow, taxRetirement, derivedGrossToday, items: evaluatedItems };
+  }, [tuevItems, contracts, currentNetIncome, isMarried, calculations, kvStatus, hasChildren]);
+
   // SVG Helper
   const formatCurrency = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val);
   const formatResultCurrency = (val) => formatCurrency(showRealValue ? val / calculations.inflationFactor : val);
@@ -1166,111 +1327,156 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-28 print:bg-white print:pb-0">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-28 print:bg-slate-50 print:pb-0" style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
+      {/* HIER IST DER MAGISCHE BEFEHL: style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }} erzwingt den Druck in Web-Optik! */}
       
       {/* HEADER */}
-      <header className="sticky top-0 z-50 bg-slate-900 text-white p-4 shadow-md print:hidden">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-3">
-            {/* Hier können Sie Eye durch Compass, Target, Search oder PiggyBank austauschen */}
-            <Compass className="w-8 h-8 text-emerald-400" />
-            <div>
-              <h1 className="text-xl font-bold">JS-Rentenplaner Pro</h1>
-              <p className="text-slate-400 text-sm">Wir helfen Ihnen Ihre Rente klar zu sehen.</p>
+      <header className="sticky top-0 z-50 bg-slate-900 text-white p-3 sm:p-4 shadow-md print:hidden">
+        <div className="max-w-6xl mx-auto flex flex-col lg:flex-row items-center gap-4">
+          
+          {/* Logo & Titel (LINKS - Mittig in der linken Hälfte) */}
+          <div className="flex items-center justify-center gap-4 sm:gap-6 w-full lg:w-1/2 shrink-0">
+            <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-14 h-14 sm:w-20 sm:h-20 shrink-0">
+              <rect x="15" y="60" width="16" height="25" rx="4" fill="#94A3B8" />
+              <rect x="42" y="40" width="16" height="45" rx="4" fill="#64748B" />
+              <rect x="69" y="20" width="16" height="65" rx="4" fill="#1E40AF" />
+              <path d="M10 50 L40 30 L60 40 L85 10" stroke="#10B981" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="85" cy="10" r="8" fill="#10B981" />
+            </svg>
+            <div className="text-left">
+              <h1 className="text-xl sm:text-3xl font-extrabold leading-tight tracking-tight">JS-Rentenplaner </h1>
+              <p className="text-slate-400 text-xs sm:text-base font-medium mt-0.5">Ihre Zukunft. Heute smart geplant.</p>
             </div>
           </div>
-          <div className="flex bg-slate-800 p-1.5 rounded-lg border border-slate-700 gap-1.5 flex-wrap justify-center">
-            <button onClick={() => setShowRealValue(!showRealValue)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${showRealValue ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Coins className="w-3 h-3" /> Kaufkraft heute</button>
-            <div className="w-px bg-slate-700 mx-1"></div>
+          
+          {/* Controls (RECHTS - Zweizeilig) */}
+          <div className="flex flex-col gap-2 items-center lg:items-end w-full lg:w-1/2">
             
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white shadow">
-              <span>Infl.:</span><select value={inflationRate} onChange={e => setInflationRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer"><option value={0}>0 %</option><option value={1.5}>1,5 %</option><option value={2.0}>2,0 %</option><option value={2.5}>2,5 %</option></select>
-            </div>
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 text-white shadow">
-              <span>Index.:</span><select value={taxIndexRate} onChange={e => setTaxIndexRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer"><option value={0}>0 %</option><option value={1.0}>1,0 %</option><option value={1.5}>1,5 %</option><option value={2.0}>2,0 %</option></select>
-            </div>
-            <div className="w-px bg-slate-700 mx-1"></div>
+            {/* Obere Reihe: Einstellungen */}
+            <div className="flex bg-slate-800 p-1.5 rounded-lg border border-slate-700 gap-1.5 flex-wrap justify-center lg:justify-end">
+              <button onClick={() => setShowRealValue(!showRealValue)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${showRealValue ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Coins className="w-3 h-3" /> Kaufkraft heute</button>
+              <div className="w-px bg-slate-700 mx-1"></div>
+              
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white shadow">
+                <span>Infl.:</span><select value={inflationRate} onChange={e => setInflationRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer"><option value={0}>0 %</option><option value={1.5}>1,5 %</option><option value={2.0}>2,0 %</option><option value={2.5}>2,5 %</option></select>
+              </div>
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 text-white shadow">
+                <span>Index.:</span>
+                <select value={taxIndexRate} onChange={e => setTaxIndexRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer">
+                  <option value={0}>0 %</option>
+                  <option value={1.0}>1,0 %</option>
+                  <option value={1.5}>1,5 %</option>
+                  <option value={2.0}>2,0 %</option>
+                  {taxIndexRate !== '' && ![0, 1.0, 1.5, 2.0].includes(taxIndexRate) && <option value={taxIndexRate}>{taxIndexRate} %</option>}
+                </select>
+              </div>
+              <div className="w-px bg-slate-700 mx-1"></div>
 
-            <button onClick={() => setIsMarried(false)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${!isMarried ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}><User className="w-3 h-3" /> Single</button>
-            <button onClick={() => setIsMarried(true)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${isMarried ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}><Users className="w-3 h-3" /> Verheiratet</button>
-            
-            <div className="w-px bg-slate-700 mx-1"></div>
-            
-            {/* SESSION MANAGEMENT BUTTONS */}
-            <input type="file" accept=".json" ref={fileInputRef} onChange={handleImport} className="hidden" />
-            <button onClick={() => fileInputRef.current.click()} title="Profil laden" className="p-1.5 rounded-md text-slate-400 hover:bg-slate-700 hover:text-white"><FolderOpen className="w-4 h-4" /></button>
-            <button onClick={handleExport} title="Profil speichern" className="p-1.5 rounded-md text-slate-400 hover:bg-slate-700 hover:text-white"><Save className="w-4 h-4" /></button>
-            
-            <div className="w-px bg-slate-700 mx-1"></div>
-
-            <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium bg-slate-800 border border-slate-700 text-white">
-              <span className="text-slate-400 hidden sm:inline">PDF-Text:</span>
-              <select value={printExplanationMode} onChange={e => setPrintExplanationMode(e.target.value)} className="bg-transparent font-bold outline-none cursor-pointer">
-                <option value="none" className="text-slate-800">Ohne</option>
-                <option value="short" className="text-slate-800">Kurz</option>
-                <option value="long" className="text-slate-800">Ausführlich</option>
-              </select>
+              <button onClick={() => setIsMarried(false)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${!isMarried ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}><User className="w-3 h-3" /> Single</button>
+              <button onClick={() => setIsMarried(true)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${isMarried ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}><Users className="w-3 h-3" /> Verheiratet</button>
             </div>
-            
-            <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-rose-600 text-white hover:bg-rose-500 shadow-sm ml-1"><Download className="w-3 h-3" /> PDF</button>
+
+            {/* Untere Reihe: Aktionen & Export */}
+            <div className="flex bg-slate-800 p-1.5 rounded-lg border border-slate-700 gap-1.5 flex-wrap justify-center lg:justify-end">
+              <input type="file" accept=".json" ref={fileInputRef} onChange={handleImport} className="hidden" />
+              <button onClick={() => fileInputRef.current.click()} title="Profil laden" className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"><FolderOpen className="w-3.5 h-3.5" /> Laden</button>
+              <button onClick={handleExport} title="Profil speichern" className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"><Save className="w-3.5 h-3.5" /> Speichern</button>
+              
+              <div className="w-px bg-slate-700 mx-1"></div>
+
+              <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium bg-slate-800 border border-slate-700 text-white">
+                <span className="text-slate-400 hidden sm:inline">PDF-Text:</span>
+                <select value={printExplanationMode} onChange={e => setPrintExplanationMode(e.target.value)} className="bg-transparent font-bold outline-none cursor-pointer">
+                  <option value="none" className="text-slate-800">Ohne</option>
+                  <option value="short" className="text-slate-800">Kurz</option>
+                  <option value="long" className="text-slate-800">Ausführlich</option>
+                </select>
+              </div>
+              
+              <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-rose-600 text-white hover:bg-rose-500 shadow-sm ml-1 transition-colors"><Download className="w-3 h-3" /> PDF Export</button>
+            </div>
+
           </div>
         </div>
       </header>
 
-      {/* PRINT HEADER */}
-      <div className="hidden print:block max-w-6xl mx-auto p-6 text-center border-b-2 border-slate-200 mb-6">
-        <h2 className="text-2xl font-bold uppercase tracking-widest">Persönliches Vorsorge-Gutachten</h2>
-        <p className="text-slate-500 mt-2 text-lg">Wir helfen Ihnen Ihre Rente klar zu sehen.</p>
+      {/* NEUER PREMIUM PRINT HEADER */}
+      <div className="hidden print:flex max-w-6xl mx-auto p-8 border-b-4 border-emerald-500 mb-8 items-center justify-between bg-white shadow-sm rounded-t-2xl mt-4">
+        <div className="flex items-center gap-6">
+          <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-24 h-24 shrink-0">
+            <rect x="15" y="60" width="16" height="25" rx="4" fill="#94A3B8" />
+            <rect x="42" y="40" width="16" height="45" rx="4" fill="#64748B" />
+            <rect x="69" y="20" width="16" height="65" rx="4" fill="#1E40AF" />
+            <path d="M10 50 L40 30 L60 40 L85 10" stroke="#10B981" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="85" cy="10" r="8" fill="#10B981" />
+          </svg>
+          <div className="text-left">
+            <h2 className="text-4xl font-extrabold tracking-tight text-slate-900 mb-1">JS-Rentenplaner Pro</h2>
+            <p className="text-slate-500 text-xl font-medium">Persönliches Vorsorge-Gutachten</p>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="inline-block bg-slate-50 p-4 rounded-xl border border-slate-200 text-left">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Auswertung für</p>
+            <p className="text-lg font-black text-slate-800">Person {isMarried ? 'A & B (Haushalt)' : 'A'}</p>
+            <p className="text-xs text-slate-500 mt-2 border-t border-slate-200 pt-2 font-medium flex justify-between gap-4">
+              <span>Datum:</span> <span className="font-bold text-slate-700">{new Date().toLocaleDateString('de-DE')}</span>
+            </p>
+          </div>
+        </div>
       </div>
 
-      <main className="max-w-6xl mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 print:p-0 print:block">
+      <main className="max-w-6xl mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 print:px-6 print:py-0 print:block">
         
-        {/* PRINT ONLY: ZUSAMMENFASSUNG EINGABEN */}
+        {/* PREMIUM PRINT ONLY: ZUSAMMENFASSUNG EINGABEN */}
         <div className="hidden print:block mb-8 print:break-after-page">
-           <h2 className="text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-4 text-slate-800">1. Ihre Eingabedaten & Prämissen</h2>
+           <h2 className="text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-6 text-slate-800">1. Ihre Eingabedaten & Prämissen</h2>
            
-           <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6">
-              <div className="grid grid-cols-2 gap-y-4 gap-x-8 text-sm">
-                 <div><span className="font-bold">Alter heute:</span> {Math.floor(calculations.currentAgeA)} Jahre {isMarried ? `(Person A) / ${Math.floor(calculations.currentAgeB)} Jahre (Person B)` : ''}</div>
-                 <div><span className="font-bold">Renteneintritt:</span> {Math.floor(calculations.retirementAgeA)} Jahre (im Jahr {calculations.baseRetYear})</div>
-                 <div><span className="font-bold">Zielbedarf (Netto):</span> {formatCurrency(targetIncomeToday)} (in Kaufkraft heute)</div>
-                 <div><span className="font-bold">Steuer-Status:</span> {isMarried ? 'Splittingtarif (Verheiratet)' : 'Grundtarif (Single)'}</div>
-                 <div><span className="font-bold">KV-Status im Alter:</span> {kvStatus === 'kvdr' ? 'KVdR (Pflichtversichert)' : kvStatus === 'pkv' ? 'Privat versichert (PKV)' : 'Freiwillig gesetzlich'}</div>
-                 <div><span className="font-bold">Inflation (angenommen):</span> {inflationRate.toLocaleString("de-DE")} % p.a.</div>
-                 <div><span className="font-bold">Tarif-Indexierung:</span> {taxIndexRate.toLocaleString("de-DE")} % p.a.</div>
+           <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-6 mb-6">
+              <div className="grid grid-cols-3 gap-y-6 gap-x-8 text-sm">
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Alter heute</span> <span className="font-bold text-lg text-slate-800">{Math.floor(calculations.currentAgeA)} Jahre {isMarried ? <span className="text-slate-400 text-sm font-normal">/ {Math.floor(calculations.currentAgeB)} J.</span> : ''}</span></div>
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Renteneintritt</span> <span className="font-bold text-lg text-slate-800">{Math.floor(calculations.retirementAgeA)} Jahre <span className="text-slate-400 text-sm font-normal">({calculations.baseRetYear})</span></span></div>
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider mb-1">Zielbedarf (Netto)</span> <span className="font-black text-xl text-indigo-600">{formatCurrency(targetIncomeToday)} <span className="text-xs font-normal text-slate-500">Kaufkraft heute</span></span></div>
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Steuer-Status</span> <span className="font-bold text-base text-slate-800">{isMarried ? 'Splittingtarif (Verheiratet)' : 'Grundtarif (Single)'}</span></div>
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">KV-Status im Alter</span> <span className="font-bold text-base text-slate-800">{kvStatus === 'kvdr' ? 'KVdR (Pflichtversichert)' : kvStatus === 'pkv' ? 'Privat versichert (PKV)' : 'Freiwillig gesetzlich'}</span></div>
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Inflation / Tarif-Index.</span> <span className="font-bold text-base text-slate-800">{inflationRate.toLocaleString("de-DE")} % p.a. <span className="text-slate-400 font-normal">/ {taxIndexRate.toLocaleString("de-DE")} % p.a.</span></span></div>
               </div>
            </div>
 
-           <div className="mb-6">
-              <h3 className="font-bold text-slate-800 mb-2">Gesetzliche Basis (Schicht 1)</h3>
-              <ul className="list-disc pl-5 text-sm text-slate-700 space-y-1">
-                 <li>Brutto-Anspruch heute: <strong>{formatCurrency(grvGrossA)} / Monat</strong> {isMarried && grvGrossB > 0 ? `(Person A) & ${formatCurrency(grvGrossB)} / Monat (Person B)` : ''} <span className="text-slate-500">(Dynamik: {grvIncreaseRate}% p.a.)</span></li>
-              </ul>
+           <div className="mb-6 bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+              <h3 className="font-bold text-slate-800 mb-3 border-b border-slate-100 pb-2">Gesetzliche Basis (Schicht 1)</h3>
+              <div className="flex justify-between items-center bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                 <span className="font-semibold text-slate-700">Brutto-Anspruch heute</span>
+                 <span className="text-xl font-black text-blue-700">{formatCurrency(grvGrossA)} <span className="text-sm font-bold text-blue-500">/ M</span> {isMarried && grvGrossB > 0 ? <span className="text-slate-500 text-sm font-semibold"> & {formatCurrency(grvGrossB)} / M</span> : ''}</span>
+              </div>
+              <div className="text-[10px] text-slate-500 mt-2 text-right uppercase tracking-wider font-bold">Angenommene Rentendynamik: {grvIncreaseRate}% p.a.</div>
            </div>
 
            {contracts.length > 0 && (
-             <div>
-                <h3 className="font-bold text-slate-800 mb-2">Ihre Zusatz-Verträge & Depots</h3>
+             <div className="bg-white border border-slate-200 rounded-xl p-0 shadow-sm overflow-hidden">
+                <div className="p-4 bg-slate-50 border-b border-slate-200"><h3 className="font-bold text-slate-800">Ihre Zusatz-Verträge & Depots</h3></div>
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
-                    <tr className="bg-slate-100 text-slate-800">
-                      <th className="p-3 font-bold w-20 border-b border-slate-200">Schicht</th>
-                      <th className="p-3 font-bold w-28 border-b border-slate-200">Art</th>
-                      <th className="p-3 font-bold border-b border-slate-200">Name / Inhaber</th>
-                      <th className="p-3 font-bold border-b border-slate-200">Wert / Beitrag</th>
+                    <tr className="bg-white text-slate-400 text-[10px] uppercase tracking-wider border-b border-slate-200">
+                      <th className="p-4 font-bold w-24">Schicht</th>
+                      <th className="p-4 font-bold w-40">Art</th>
+                      <th className="p-4 font-bold">Name / Inhaber</th>
+                      <th className="p-4 font-bold text-right">Wert / Beitrag</th>
                     </tr>
                   </thead>
-                  <tbody className="text-slate-700">
+                  <tbody className="text-slate-800">
                      {contracts.map(c => (
-                        <tr key={c.id} className="border-b border-slate-100">
-                           <td className="p-3">Schicht {c.layer}</td>
-                           <td className="p-3 uppercase">{c.type.replace('prvKapital', 'Privat (Kapital)').replace('prvRente', 'Privat (Rente)').replace('bavKapital', 'bAV (Kapital)')}</td>
-                           <td className="p-3 font-medium">{c.name} {isMarried ? `(${c.owner})` : ''}</td>
-                           <td className="p-3 text-xs">
-                              {c.type === 'etf' ? `Kapital heute: ${formatCurrency(c.capital)} | Sparrate: ${formatCurrency(c.monthly)}/M` : 
-                               c.type.includes('Kapital') ? `Zielkapital: ${formatCurrency(c.gross)}` :
-                               c.type === 'immobilie' ? `Kaltmiete: ${formatCurrency(c.gross)}/M` :
-                               `Garantierente: ${formatCurrency(c.gross)}/M Brutto`
+                        <tr key={c.id} className="border-b border-slate-100 last:border-0">
+                           <td className="p-4">
+                              <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${c.layer === 1 ? 'bg-blue-100 text-blue-700' : c.layer === 2 ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'}`}>Schicht {c.layer}</span>
+                           </td>
+                           <td className="p-4 uppercase text-[11px] font-bold text-slate-500">{c.type.replace('prvKapital', 'Privat (Kapital)').replace('prvRente', 'Privat (Rente)').replace('bavKapital', 'bAV (Kapital)')}</td>
+                           <td className="p-4 font-bold text-slate-700">{c.name} {isMarried ? <span className="text-slate-400 font-normal">({c.owner})</span> : ''}</td>
+                           <td className="p-4 text-sm font-black text-right text-slate-800">
+                              {c.type === 'etf' ? `${formatCurrency(c.capital)}` : 
+                               c.type.includes('Kapital') ? `${formatCurrency(c.gross)}` :
+                               c.type === 'immobilie' ? `${formatCurrency(c.gross)} / M` :
+                               `${formatCurrency(c.gross)} / M`
                               }
                            </td>
                         </tr>
@@ -1380,7 +1586,7 @@ export default function App() {
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print:border-none print:shadow-none">
             <div className="flex border-b border-slate-200 bg-slate-50 print:hidden">
               {['s1', 's2', 's3', 'planer'].map(t => (
-                <button key={t} className={`flex-1 py-3 text-[10px] sm:text-xs font-bold uppercase ${activeTab === t ? 'bg-white text-indigo-700 border-b-2 border-indigo-700' : 'text-slate-500'}`} onClick={() => setActiveTab(t)}>{t === 's1' ? 'Schicht 1' : t === 's2' ? 'Schicht 2' : t === 's3' ? 'Schicht 3' : 'Planer'}</button>
+                <button key={t} className={`flex-1 py-3 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider ${activeTab === t ? 'bg-white text-indigo-700 border-b-2 border-indigo-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100/50'}`} onClick={() => setActiveTab(t)}>{t === 's1' ? 'Schicht 1' : t === 's2' ? 'Schicht 2' : t === 's3' ? 'Schicht 3' : 'Planer'}</button>
               ))}
             </div>
             <div className="p-4 bg-slate-50/50 min-h-[400px] print:min-h-0 print:p-0 print:bg-transparent">
@@ -1419,7 +1625,14 @@ export default function App() {
 
                       <div className="grid grid-cols-2 gap-4">
                         <div><label className="block text-xs font-semibold text-slate-600 mb-1">Anspruch (€/M)</label><input type="number" value={p==='A'?grvGrossA:grvGrossB} onChange={e => p==='A'?setGrvGrossA(parseNum(e.target.value)):setGrvGrossB(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
-                        <div><label className="block text-xs font-semibold text-slate-600 mb-1">Dynamik (%)</label><input type="number" step="0.1" value={grvIncreaseRate} onChange={e => setGrvIncreaseRate(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">Rentensteigerung (%)</label>
+                          <input type="number" step="0.1" value={grvIncreaseRate} onChange={e => {
+                             const val = parseNum(e.target.value);
+                             setGrvIncreaseRate(val);
+                             setTaxIndexRate(val); // Synchronisiert den Index automatisch mit
+                          }} className="w-full border rounded p-2" />
+                        </div>
                       </div>
                       {((p==='A' ? calculations.grvDiscountA : calculations.grvDiscountB) > 0) && (
                          <div className="mt-3 text-[10px] text-rose-600 bg-rose-50 p-2 rounded flex gap-1.5 border border-rose-100">
@@ -1797,6 +2010,208 @@ export default function App() {
 
         </div>
       </main>
+
+      {/* NEUER BEREICH: VERTRAGS-TÜV MULTI-COMPARISON */}
+      <div className="max-w-6xl mx-auto p-4 sm:p-6 mb-24 print:block print:break-before-page">
+         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 border-b-2 border-amber-200 pb-4">
+             <div>
+                 <div className="flex items-center gap-3 font-bold text-amber-800 text-2xl">
+                    <SearchCheck className="w-8 h-8"/> Vertrags-TÜV: Der große Vergleich
+                 </div>
+                 <p className="text-sm text-slate-600 mt-2 max-w-3xl leading-relaxed">
+                    Stellen Sie Ihre Verträge direkt nebeneinander. Die Engine schätzt Ihren heutigen Steuersatz auf Basis Ihres Gehalts ({formatCurrency(currentNetIncome)}) und berechnet den echten Netto-Aufwand. Im Rentenalter werden Steuern und KV/PV-Abzüge exakt abgezogen. So finden Sie heraus, welcher Vertrag die beste Netto-Rendite liefert!
+                 </p>
+             </div>
+             <div className="shrink-0 bg-amber-100 p-2 rounded-xl border border-amber-200 shadow-sm relative z-10">
+                 <select 
+                     value="" 
+                     onChange={(e) => { if(e.target.value) addTuevItem(e.target.value); }} 
+                     className="bg-white border-2 border-amber-300 text-amber-900 rounded-lg p-2.5 text-sm font-bold shadow-sm outline-none hover:border-amber-400 cursor-pointer w-full md:w-auto"
+                 >
+                     <option value="">➕ Vertrag hinzufügen...</option>
+                     {contracts.filter(c => ['basis', 'bav', 'bavKapital', 'riester', 'prvRente', 'prvKapital', 'etf'].includes(c.type)).map(c => (
+                        <option key={c.id} value={c.id}>Schicht {c.layer} | {c.name || c.type.toUpperCase()}</option>
+                     ))}
+                 </select>
+             </div>
+         </div>
+         
+         {/* Global Tax Indicators */}
+         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-inner">
+             <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-center">
+                <div className="text-[10px] text-slate-500 uppercase font-bold mb-0.5">Ihr heutiger Grenzsteuersatz</div>
+                <div className="text-lg font-black text-emerald-600">{(tuevData.marginalTaxNow * 100).toFixed(1)} %</div>
+                <div className="text-[9px] text-slate-400 mt-1 leading-tight">Steuerersparnis auf genau die Euro, die in die bAV/Rürup fließen (Progressionsspitze, <strong>nicht</strong> der Durchschnittsteuersatz!).</div>
+             </div>
+             {tuevData.svNow > 0 && (
+                 <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-center relative overflow-hidden">
+                    <div className="absolute right-0 top-0 bottom-0 w-1 bg-emerald-400"></div>
+                    <div className="text-[10px] text-slate-500 uppercase font-bold mb-0.5">Ihre SV-Ersparnis heute</div>
+                    <div className="text-lg font-black text-emerald-600">{(tuevData.svNow * 100).toFixed(1)} %</div>
+                    <div className="text-[9px] text-slate-500 mt-1 leading-tight">Ersparnis bei RV/AV/KV/PV. <br/><span className="text-emerald-700 font-bold">Gesamte Förderquote: {((tuevData.marginalTaxNow + tuevData.svNow) * 100).toFixed(1)} %</span> auf Ihren Bruttobeitrag!</div>
+                 </div>
+             )}
+             <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-center">
+                <div className="text-[10px] text-slate-500 uppercase font-bold mb-0.5">Grenzsteuersatz im Rentenalter</div>
+                <div className="text-lg font-black text-rose-600">{(tuevData.taxRetirement * 100).toFixed(1)} %</div>
+                <div className="text-[9px] text-slate-400 mt-1 leading-tight">Dieser exakte Satz wird später als Abzug auf Ihre Auszahlungen fällig.</div>
+             </div>
+         </div>
+         
+         {/* Comparison Grid */}
+         {tuevData.items.length === 0 ? (
+             <div className="bg-amber-50 h-48 rounded-xl border-2 border-dashed border-amber-200 flex flex-col items-center justify-center text-amber-600/50">
+                 <Activity className="w-12 h-12 mb-2" />
+                 <p className="text-sm font-medium">Bitte fügen Sie oben rechts einen Vertrag hinzu, um den Vergleich zu starten.</p>
+             </div>
+         ) : (
+             <div className="flex flex-col gap-6 pb-6 pt-2 px-1">
+                 {tuevData.items.map((item, index) => {
+                     if (item.invalid) return null;
+                     return (
+                         <div key={item.id} className="bg-white rounded-xl shadow-md border border-slate-200 shrink-0 flex flex-col lg:flex-row overflow-hidden relative w-full">
+                             
+                             {/* Warning if no payout (Absolute Positioned over header) */}
+                             {item.payoutGross === 0 && (
+                                 <div className="absolute top-0 left-0 right-0 z-10 bg-rose-50 text-rose-600 text-xs p-2.5 border-b border-rose-200 flex items-center justify-center gap-2">
+                                     <AlertCircle className="w-5 h-5 shrink-0" />
+                                     <span>Dieser Vertrag generiert noch keine Rente/Kapitalauszahlung (Wert ist 0). Bitte oben im Planer eine Zielsumme hinterlegen!</span>
+                                 </div>
+                             )}
+
+                             {/* LEFT COLUMN: Inputs */}
+                             <div className={`w-full lg:w-1/3 p-5 bg-slate-50 border-b lg:border-b-0 lg:border-r border-slate-200 ${item.payoutGross === 0 ? 'pt-12' : ''}`}>
+                                 <div className="flex justify-between items-start mb-5">
+                                     <div>
+                                         <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Schicht {item.layer} | {item.cType.toUpperCase()}</div>
+                                         <div className="font-bold text-slate-800 text-lg" title={item.name}>{item.name || 'Ohne Name'}</div>
+                                     </div>
+                                     <button onClick={() => removeTuevItem(item.id)} className="text-slate-400 hover:bg-rose-100 hover:text-rose-600 p-2 rounded-lg transition-colors" title="Aus Vergleich entfernen">
+                                         <Trash className="w-5 h-5" />
+                                     </button>
+                                 </div>
+
+                                 <div className="space-y-4">
+                                     <div>
+                                         <label className="block text-xs font-bold text-slate-500 mb-1.5">Ihr mtl. Gesamt-Beitrag (Brutto)</label>
+                                         <input type="number" value={item.grossMonthly} onChange={e => updateTuevItem(item.id, 'grossMonthly', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 text-sm font-semibold bg-white shadow-sm" />
+                                     </div>
+                                     
+                                     {item.cType.includes('bav') && (
+                                         <div><label className="block text-xs font-bold text-slate-500 mb-1.5">Davon AG-Zuschuss (€)</label><input type="number" value={item.subsidyBav} onChange={e => updateTuevItem(item.id, 'subsidyBav', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 text-sm bg-white shadow-sm" /></div>
+                                     )}
+                                     {item.cType === 'riester' && (
+                                         <div><label className="block text-xs font-bold text-slate-500 mb-1.5">Jährliche Zulagen (€)</label><input type="number" value={item.subsidyRiester} onChange={e => updateTuevItem(item.id, 'subsidyRiester', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 text-sm bg-white shadow-sm" /></div>
+                                     )}
+
+                                     <div className="grid grid-cols-2 gap-4">
+                                         <div>
+                                            <label className="block text-xs font-bold text-slate-500 mb-1.5">Vertragsbeginn</label>
+                                            <input type="text" placeholder="TT.MM.JJJJ" value={item.safeStartDate} onChange={e => updateTuevItem(item.id, 'startDate', formatDateInput(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 text-sm bg-white shadow-sm" />
+                                         </div>
+                                         {!item.isKapital && (
+                                             <div>
+                                                <label className="block text-xs font-bold text-slate-500 mb-1.5">Lebenserwartung</label>
+                                                <div className="relative">
+                                                   <input type="number" value={item.safeLifeExpectancy} onChange={e => updateTuevItem(item.id, 'lifeExpectancy', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 text-sm bg-white shadow-sm pr-12" />
+                                                   <span className="absolute right-3 top-2 text-sm text-slate-400">Alter</span>
+                                                </div>
+                                             </div>
+                                         )}
+                                     </div>
+                                 </div>
+                             </div>
+
+                             {/* MIDDLE COLUMN: Einzahlung vs Auszahlung */}
+                             <div className={`w-full lg:w-2/5 p-5 flex flex-col justify-center gap-5 border-b lg:border-b-0 lg:border-r border-slate-100 ${item.payoutGross === 0 ? 'pt-12' : ''}`}>
+                                 {/* Results: Einzahlung */}
+                                 <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                                     <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Ihre echte Belastung (Ansparphase)</div>
+                                     <div className="space-y-1.5 mb-3">
+                                         <div className="flex justify-between text-xs text-slate-500"><span>Brutto-Beitrag:</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
+                                         {item.agZuschuss > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>AG-Zuschuss:</span> <span>- {formatCurrency(item.agZuschuss)}</span></div>}
+                                         {item.zulagenMonatlich > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>Zulagen:</span> <span>- {formatCurrency(item.zulagenMonatlich)}</span></div>}
+                                         {item.steuerErsparnis > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>Steuer-Vorteil:</span> <span>- {formatCurrency(item.steuerErsparnis)}</span></div>}
+                                         {item.svErsparnis > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>SV-Ersparnis:</span> <span>- {formatCurrency(item.svErsparnis)}</span></div>}
+                                     </div>
+                                     <div className="flex justify-between items-end border-t border-slate-200 pt-2.5">
+                                         <div className="text-xs font-bold text-slate-800">Echter Netto-Aufwand:</div>
+                                         <div className="text-right">
+                                             <div className="text-lg font-black text-slate-800">{formatCurrency(item.echterNettoAufwand)} <span className="text-[10px] font-normal text-slate-500">/ M</span></div>
+                                             <div className="text-[10px] text-slate-500 font-medium mt-0.5">Gesamt bis Rente: {formatCurrency(item.summeNettoEinzahlung)}</div>
+                                         </div>
+                                     </div>
+                                 </div>
+
+                                 {/* Results: Auszahlung */}
+                                 <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                                     <div className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-3">Ihr echter Ertrag (Auszahlungsphase)</div>
+                                     <div className="space-y-1.5 mb-3">
+                                         <div className="flex justify-between text-xs text-slate-600"><span>Brutto {item.isKapital ? 'Kapital' : 'Rente'}:</span> <span className="font-bold">{formatCurrency(item.payoutGross)}</span></div>
+                                         {!item.isKapital && item.kvPvAbzug > 0 && <div className="flex justify-between text-xs text-rose-500"><span>KV/PV-Abzug:</span> <span>- {formatCurrency(item.kvPvAbzug)}</span></div>}
+                                         {!item.isKapital && item.steuerAbzug > 0 && <div className="flex justify-between text-xs text-rose-500"><span>Steuer-Abzug:</span> <span>- {formatCurrency(item.steuerAbzug)}</span></div>}
+                                         {item.isKapital && <div className="text-[10px] text-rose-500 text-right italic mt-1">Steuern/Abgaben bereits von Engine abgezogen</div>}
+                                     </div>
+                                     <div className="flex justify-between items-end border-t border-amber-200 pt-2.5">
+                                         <div className="text-xs font-bold text-amber-900">Echtes Netto {item.isKapital ? 'Kapital' : '(Mtl.)'}:</div>
+                                         <div className="text-right">
+                                             <div className="text-2xl font-black text-amber-600">
+                                                 {formatCurrency(item.isKapital ? item.echteNettoKapital : item.echteNettoRente)}
+                                             </div>
+                                             {!item.isKapital && (
+                                                 <div className="text-[10px] text-amber-700/80 font-medium mt-0.5">Gesamt in Rente: {formatCurrency(item.summeNettoAuszahlung)}</div>
+                                             )}
+                                         </div>
+                                     </div>
+                                 </div>
+                             </div>
+
+                             {/* RIGHT COLUMN: KPIs */}
+                             <div className={`w-full lg:w-1/4 p-6 bg-white flex flex-col justify-center gap-6 ${item.payoutGross === 0 ? 'pt-12' : ''}`}>
+                                 <div>
+                                     <div className="flex justify-between items-end mb-1.5">
+                                         <span className="text-sm font-bold text-slate-500">Netto-Rendite (p.a.)</span>
+                                         <span className={`text-2xl font-black ${item.irr > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{item.irr.toFixed(2)} %</span>
+                                     </div>
+                                     <div className="w-full bg-slate-100 h-2.5 rounded-full mt-1.5 overflow-hidden">
+                                         <div className={`h-full ${item.irr > 0 ? 'bg-emerald-400' : 'bg-rose-400'}`} style={{ width: `${Math.min(100, Math.max(0, (item.irr + 5) * 5))}%` }}></div>
+                                     </div>
+                                 </div>
+                                 
+                                 <div className="pt-5 border-t border-slate-100">
+                                     <div className="flex justify-between items-center mb-2">
+                                         <span className="text-sm font-bold text-slate-600">Hebelfaktor</span>
+                                         <span className="text-xl font-black text-indigo-600">{item.nettoHebel.toFixed(2)} x</span>
+                                     </div>
+                                     <div className="text-xs text-slate-500 leading-tight">Aus <strong className="text-slate-600">{formatCurrency(item.summeNettoEinzahlung)}</strong> Netto-Einsatz werden insgesamt <strong className="text-slate-600">{formatCurrency(item.summeNettoAuszahlung)}</strong> Netto-Ertrag.</div>
+                                 </div>
+                                 
+                                 {!item.isKapital ? (
+                                     <div className="pt-5 border-t border-slate-100">
+                                         <div className="flex justify-between items-center mb-2">
+                                             <span className="text-sm font-bold text-slate-600">Amortisation</span>
+                                             <span className="text-xl font-black text-slate-800">{item.amortisationsJahre.toFixed(1)} Jahre</span>
+                                         </div>
+                                         <div className="text-xs text-slate-500 leading-tight">Nach {item.amortisationsJahre.toFixed(1)} Jahren Rentenbezug haben Sie Ihre Netto-Gesamteinzahlung von <strong className="text-slate-700">{formatCurrency(item.summeNettoEinzahlung)}</strong> komplett wieder zurückerhalten.</div>
+                                     </div>
+                                 ) : (
+                                     <div className="pt-5 border-t border-slate-100">
+                                         <div className="flex justify-between items-center mb-2">
+                                             <span className="text-sm font-bold text-slate-600">Netto-Gewinn</span>
+                                             <span className={`text-xl font-black ${item.echterNettoGewinn >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                 {item.echterNettoGewinn >= 0 ? '+' : ''}{formatCurrency(item.echterNettoGewinn)}
+                                             </span>
+                                         </div>
+                                         <div className="text-xs text-slate-500 leading-tight">Zieht man Ihre gesamten Netto-Einzahlungen (<strong className="text-slate-700">{formatCurrency(item.summeNettoEinzahlung)}</strong>) vom Endkapital ab, bleibt dieser reine Gewinn nach Steuern zur freien Verfügung.</div>
+                                     </div>
+                                 )}
+                             </div>
+                         </div>
+                     );
+                 })}
+             </div>
+         )}
+      </div>
 
       {/* DASHBOARD FOOTER */}
       <div className="fixed bottom-0 left-0 right-0 z-50 bg-slate-900 border-t border-slate-700 shadow-xl print:hidden">
