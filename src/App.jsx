@@ -78,6 +78,9 @@ const formatDateInput = (value) => {
 };
 
 export default function App() {
+  // --- STATE FÜR DIE KOPFZEILE ---
+  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
+
   // --- STATE MANAGEMENT ---
   const [isMarried, setIsMarried] = useState(false); 
   const [showRealValue, setShowRealValue] = useState(false);
@@ -2065,56 +2068,56 @@ export default function App() {
                  <p className="text-sm font-medium">Bitte fügen Sie oben rechts einen Vertrag hinzu, um den Vergleich zu starten.</p>
              </div>
          ) : (
-             <div className="flex flex-col gap-6 pb-6 pt-2 px-1">
+             <div className="flex flex-col gap-6 print:gap-4 pb-6 pt-2 px-1">
                  {tuevData.items.map((item, index) => {
                      if (item.invalid) return null;
                      return (
-                         <div key={item.id} className="bg-white rounded-xl shadow-md border border-slate-200 shrink-0 flex flex-col lg:flex-row overflow-hidden relative w-full">
+                         <div key={item.id} className="bg-white rounded-xl shadow-md border border-slate-200 shrink-0 flex flex-col lg:flex-row print:flex-row overflow-hidden relative w-full print:break-inside-avoid print:shadow-none print:border-slate-300">
                              
                              {/* Warning if no payout (Absolute Positioned over header) */}
                              {item.payoutGross === 0 && (
-                                 <div className="absolute top-0 left-0 right-0 z-10 bg-rose-50 text-rose-600 text-xs p-2.5 border-b border-rose-200 flex items-center justify-center gap-2">
-                                     <AlertCircle className="w-5 h-5 shrink-0" />
-                                     <span>Dieser Vertrag generiert noch keine Rente/Kapitalauszahlung (Wert ist 0). Bitte oben im Planer eine Zielsumme hinterlegen!</span>
+                                 <div className="absolute top-0 left-0 right-0 z-10 bg-rose-50 text-rose-600 text-xs p-2.5 print:p-1.5 border-b border-rose-200 flex items-center justify-center gap-2">
+                                     <AlertCircle className="w-5 h-5 shrink-0 print:w-3.5 print:h-3.5" />
+                                     <span className="print:text-[10px]">Dieser Vertrag generiert noch keine Rente/Kapitalauszahlung (Wert ist 0). Bitte oben im Planer eine Zielsumme hinterlegen!</span>
                                  </div>
                              )}
 
                              {/* LEFT COLUMN: Inputs */}
-                             <div className={`w-full lg:w-1/3 p-5 bg-slate-50 border-b lg:border-b-0 lg:border-r border-slate-200 ${item.payoutGross === 0 ? 'pt-12' : ''}`}>
-                                 <div className="flex justify-between items-start mb-5">
+                             <div className={`w-full lg:w-1/3 print:w-1/3 p-5 print:p-4 bg-slate-50 border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-slate-200 ${item.payoutGross === 0 ? 'pt-12 print:pt-8' : ''}`}>
+                                 <div className="flex justify-between items-start mb-5 print:mb-3">
                                      <div>
                                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Schicht {item.layer} | {item.cType.toUpperCase()}</div>
-                                         <div className="font-bold text-slate-800 text-lg" title={item.name}>{item.name || 'Ohne Name'}</div>
+                                         <div className="font-bold text-slate-800 text-lg print:text-base" title={item.name}>{item.name || 'Ohne Name'}</div>
                                      </div>
-                                     <button onClick={() => removeTuevItem(item.id)} className="text-slate-400 hover:bg-rose-100 hover:text-rose-600 p-2 rounded-lg transition-colors" title="Aus Vergleich entfernen">
+                                     <button onClick={() => removeTuevItem(item.id)} className="text-slate-400 hover:bg-rose-100 hover:text-rose-600 p-2 rounded-lg transition-colors print:hidden" title="Aus Vergleich entfernen">
                                          <Trash className="w-5 h-5" />
                                      </button>
                                  </div>
 
-                                 <div className="space-y-4">
+                                 <div className="space-y-4 print:space-y-2">
                                      <div>
-                                         <label className="block text-xs font-bold text-slate-500 mb-1.5">Ihr mtl. Gesamt-Beitrag (Brutto)</label>
-                                         <input type="number" value={item.grossMonthly} onChange={e => updateTuevItem(item.id, 'grossMonthly', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 text-sm font-semibold bg-white shadow-sm" />
+                                         <label className="block text-xs print:text-[10px] font-bold text-slate-500 mb-1.5 print:mb-0.5">Ihr mtl. Gesamt-Beitrag (Brutto)</label>
+                                         <input type="number" value={item.grossMonthly} onChange={e => updateTuevItem(item.id, 'grossMonthly', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 print:text-[11px] text-sm font-semibold bg-white shadow-sm print:shadow-none" />
                                      </div>
                                      
                                      {item.cType.includes('bav') && (
-                                         <div><label className="block text-xs font-bold text-slate-500 mb-1.5">Davon AG-Zuschuss (€)</label><input type="number" value={item.subsidyBav} onChange={e => updateTuevItem(item.id, 'subsidyBav', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 text-sm bg-white shadow-sm" /></div>
+                                         <div><label className="block text-xs print:text-[10px] font-bold text-slate-500 mb-1.5 print:mb-0.5">Davon AG-Zuschuss (€)</label><input type="number" value={item.subsidyBav} onChange={e => updateTuevItem(item.id, 'subsidyBav', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 print:text-[11px] text-sm bg-white shadow-sm print:shadow-none" /></div>
                                      )}
                                      {item.cType === 'riester' && (
-                                         <div><label className="block text-xs font-bold text-slate-500 mb-1.5">Jährliche Zulagen (€)</label><input type="number" value={item.subsidyRiester} onChange={e => updateTuevItem(item.id, 'subsidyRiester', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 text-sm bg-white shadow-sm" /></div>
+                                         <div><label className="block text-xs print:text-[10px] font-bold text-slate-500 mb-1.5 print:mb-0.5">Jährliche Zulagen (€)</label><input type="number" value={item.subsidyRiester} onChange={e => updateTuevItem(item.id, 'subsidyRiester', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 print:text-[11px] text-sm bg-white shadow-sm print:shadow-none" /></div>
                                      )}
 
-                                     <div className="grid grid-cols-2 gap-4">
+                                     <div className="grid grid-cols-2 gap-4 print:gap-2">
                                          <div>
-                                            <label className="block text-xs font-bold text-slate-500 mb-1.5">Vertragsbeginn</label>
-                                            <input type="text" placeholder="TT.MM.JJJJ" value={item.safeStartDate} onChange={e => updateTuevItem(item.id, 'startDate', formatDateInput(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 text-sm bg-white shadow-sm" />
+                                            <label className="block text-xs print:text-[10px] font-bold text-slate-500 mb-1.5 print:mb-0.5">Vertragsbeginn</label>
+                                            <input type="text" placeholder="TT.MM.JJJJ" value={item.safeStartDate} onChange={e => updateTuevItem(item.id, 'startDate', formatDateInput(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 print:text-[11px] text-sm bg-white shadow-sm print:shadow-none" />
                                          </div>
                                          {!item.isKapital && (
                                              <div>
-                                                <label className="block text-xs font-bold text-slate-500 mb-1.5">Lebenserwartung</label>
+                                                <label className="block text-xs print:text-[10px] font-bold text-slate-500 mb-1.5 print:mb-0.5">Lebenserwartung</label>
                                                 <div className="relative">
-                                                   <input type="number" value={item.safeLifeExpectancy} onChange={e => updateTuevItem(item.id, 'lifeExpectancy', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 text-sm bg-white shadow-sm pr-12" />
-                                                   <span className="absolute right-3 top-2 text-sm text-slate-400">Alter</span>
+                                                   <input type="number" value={item.safeLifeExpectancy} onChange={e => updateTuevItem(item.id, 'lifeExpectancy', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 print:text-[11px] text-sm bg-white shadow-sm print:shadow-none pr-12 print:pr-10" />
+                                                   <span className="absolute right-3 print:right-1.5 top-2 print:top-1.5 text-sm print:text-[10px] text-slate-400">Alter</span>
                                                 </div>
                                              </div>
                                          )}
@@ -2123,43 +2126,43 @@ export default function App() {
                              </div>
 
                              {/* MIDDLE COLUMN: Einzahlung vs Auszahlung */}
-                             <div className={`w-full lg:w-2/5 p-5 flex flex-col justify-center gap-5 border-b lg:border-b-0 lg:border-r border-slate-100 ${item.payoutGross === 0 ? 'pt-12' : ''}`}>
+                             <div className={`w-full lg:w-2/5 print:w-2/5 p-5 print:p-4 flex flex-col justify-center gap-5 print:gap-3 border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-slate-100 ${item.payoutGross === 0 ? 'pt-12 print:pt-8' : ''}`}>
                                  {/* Results: Einzahlung */}
-                                 <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                                     <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Ihre echte Belastung (Ansparphase)</div>
-                                     <div className="space-y-1.5 mb-3">
-                                         <div className="flex justify-between text-xs text-slate-500"><span>Brutto-Beitrag:</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
-                                         {item.agZuschuss > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>AG-Zuschuss:</span> <span>- {formatCurrency(item.agZuschuss)}</span></div>}
-                                         {item.zulagenMonatlich > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>Zulagen:</span> <span>- {formatCurrency(item.zulagenMonatlich)}</span></div>}
-                                         {item.steuerErsparnis > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>Steuer-Vorteil:</span> <span>- {formatCurrency(item.steuerErsparnis)}</span></div>}
-                                         {item.svErsparnis > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>SV-Ersparnis:</span> <span>- {formatCurrency(item.svErsparnis)}</span></div>}
+                                 <div className="bg-slate-50 rounded-xl print:rounded-lg p-4 print:p-3 border border-slate-200">
+                                     <div className="text-xs print:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3 print:mb-2">Ihre echte Belastung (Ansparphase)</div>
+                                     <div className="space-y-1.5 print:space-y-1 mb-3 print:mb-2">
+                                         <div className="flex justify-between text-xs print:text-[10px] text-slate-500"><span>Brutto-Beitrag:</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
+                                         {item.agZuschuss > 0 && <div className="flex justify-between text-xs print:text-[10px] text-emerald-600"><span>AG-Zuschuss:</span> <span>- {formatCurrency(item.agZuschuss)}</span></div>}
+                                         {item.zulagenMonatlich > 0 && <div className="flex justify-between text-xs print:text-[10px] text-emerald-600"><span>Zulagen:</span> <span>- {formatCurrency(item.zulagenMonatlich)}</span></div>}
+                                         {item.steuerErsparnis > 0 && <div className="flex justify-between text-xs print:text-[10px] text-emerald-600"><span>Steuer-Vorteil:</span> <span>- {formatCurrency(item.steuerErsparnis)}</span></div>}
+                                         {item.svErsparnis > 0 && <div className="flex justify-between text-xs print:text-[10px] text-emerald-600"><span>SV-Ersparnis:</span> <span>- {formatCurrency(item.svErsparnis)}</span></div>}
                                      </div>
-                                     <div className="flex justify-between items-end border-t border-slate-200 pt-2.5">
-                                         <div className="text-xs font-bold text-slate-800">Echter Netto-Aufwand:</div>
+                                     <div className="flex justify-between items-end border-t border-slate-200 pt-2.5 print:pt-2">
+                                         <div className="text-xs print:text-[10px] font-bold text-slate-800">Echter Netto-Aufwand:</div>
                                          <div className="text-right">
-                                             <div className="text-lg font-black text-slate-800">{formatCurrency(item.echterNettoAufwand)} <span className="text-[10px] font-normal text-slate-500">/ M</span></div>
-                                             <div className="text-[10px] text-slate-500 font-medium mt-0.5">Gesamt bis Rente: {formatCurrency(item.summeNettoEinzahlung)}</div>
+                                             <div className="text-lg print:text-base font-black text-slate-800">{formatCurrency(item.echterNettoAufwand)} <span className="text-[10px] print:text-[8px] font-normal text-slate-500">/ M</span></div>
+                                             <div className="text-[10px] print:text-[8px] text-slate-500 font-medium mt-0.5 print:mt-0">Gesamt bis Rente: {formatCurrency(item.summeNettoEinzahlung)}</div>
                                          </div>
                                      </div>
                                  </div>
 
                                  {/* Results: Auszahlung */}
-                                 <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-                                     <div className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-3">Ihr echter Ertrag (Auszahlungsphase)</div>
-                                     <div className="space-y-1.5 mb-3">
-                                         <div className="flex justify-between text-xs text-slate-600"><span>Brutto {item.isKapital ? 'Kapital' : 'Rente'}:</span> <span className="font-bold">{formatCurrency(item.payoutGross)}</span></div>
-                                         {!item.isKapital && item.kvPvAbzug > 0 && <div className="flex justify-between text-xs text-rose-500"><span>KV/PV-Abzug:</span> <span>- {formatCurrency(item.kvPvAbzug)}</span></div>}
-                                         {!item.isKapital && item.steuerAbzug > 0 && <div className="flex justify-between text-xs text-rose-500"><span>Steuer-Abzug:</span> <span>- {formatCurrency(item.steuerAbzug)}</span></div>}
-                                         {item.isKapital && <div className="text-[10px] text-rose-500 text-right italic mt-1">Steuern/Abgaben bereits von Engine abgezogen</div>}
+                                 <div className="bg-amber-50 rounded-xl print:rounded-lg p-4 print:p-3 border border-amber-200">
+                                     <div className="text-xs print:text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-3 print:mb-2">Ihr echter Ertrag (Auszahlungsphase)</div>
+                                     <div className="space-y-1.5 print:space-y-1 mb-3 print:mb-2">
+                                         <div className="flex justify-between text-xs print:text-[10px] text-slate-600"><span>Brutto {item.isKapital ? 'Kapital' : 'Rente'}:</span> <span className="font-bold">{formatCurrency(item.payoutGross)}</span></div>
+                                         {!item.isKapital && item.kvPvAbzug > 0 && <div className="flex justify-between text-xs print:text-[10px] text-rose-500"><span>KV/PV-Abzug:</span> <span>- {formatCurrency(item.kvPvAbzug)}</span></div>}
+                                         {!item.isKapital && item.steuerAbzug > 0 && <div className="flex justify-between text-xs print:text-[10px] text-rose-500"><span>Steuer-Abzug:</span> <span>- {formatCurrency(item.steuerAbzug)}</span></div>}
+                                         {item.isKapital && <div className="text-[10px] print:text-[8px] text-rose-500 text-right italic mt-1 print:mt-0.5">Steuern/Abgaben bereits von Engine abgezogen</div>}
                                      </div>
-                                     <div className="flex justify-between items-end border-t border-amber-200 pt-2.5">
-                                         <div className="text-xs font-bold text-amber-900">Echtes Netto {item.isKapital ? 'Kapital' : '(Mtl.)'}:</div>
+                                     <div className="flex justify-between items-end border-t border-amber-200 pt-2.5 print:pt-2">
+                                         <div className="text-xs print:text-[10px] font-bold text-amber-900">Echtes Netto {item.isKapital ? 'Kapital' : '(Mtl.)'}:</div>
                                          <div className="text-right">
-                                             <div className="text-2xl font-black text-amber-600">
+                                             <div className="text-2xl print:text-xl font-black text-amber-600">
                                                  {formatCurrency(item.isKapital ? item.echteNettoKapital : item.echteNettoRente)}
                                              </div>
                                              {!item.isKapital && (
-                                                 <div className="text-[10px] text-amber-700/80 font-medium mt-0.5">Gesamt in Rente: {formatCurrency(item.summeNettoAuszahlung)}</div>
+                                                 <div className="text-[10px] print:text-[8px] text-amber-700/80 font-medium mt-0.5 print:mt-0">Gesamt in Rente: {formatCurrency(item.summeNettoAuszahlung)}</div>
                                              )}
                                          </div>
                                      </div>
@@ -2167,42 +2170,42 @@ export default function App() {
                              </div>
 
                              {/* RIGHT COLUMN: KPIs */}
-                             <div className={`w-full lg:w-1/4 p-6 bg-white flex flex-col justify-center gap-6 ${item.payoutGross === 0 ? 'pt-12' : ''}`}>
+                             <div className={`w-full lg:w-1/4 print:w-1/4 p-6 print:p-4 bg-white flex flex-col justify-center gap-6 print:gap-4 ${item.payoutGross === 0 ? 'pt-12 print:pt-8' : ''}`}>
                                  <div>
-                                     <div className="flex justify-between items-end mb-1.5">
-                                         <span className="text-sm font-bold text-slate-500">Netto-Rendite (p.a.)</span>
-                                         <span className={`text-2xl font-black ${item.irr > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{item.irr.toFixed(2)} %</span>
+                                     <div className="flex justify-between items-end mb-1.5 print:mb-1">
+                                         <span className="text-sm print:text-[11px] font-bold text-slate-500">Netto-Rendite (p.a.)</span>
+                                         <span className={`text-2xl print:text-xl font-black ${item.irr > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{item.irr.toFixed(2)} %</span>
                                      </div>
-                                     <div className="w-full bg-slate-100 h-2.5 rounded-full mt-1.5 overflow-hidden">
+                                     <div className="w-full bg-slate-100 h-2.5 print:h-1.5 rounded-full mt-1.5 print:mt-1 overflow-hidden">
                                          <div className={`h-full ${item.irr > 0 ? 'bg-emerald-400' : 'bg-rose-400'}`} style={{ width: `${Math.min(100, Math.max(0, (item.irr + 5) * 5))}%` }}></div>
                                      </div>
                                  </div>
                                  
-                                 <div className="pt-5 border-t border-slate-100">
-                                     <div className="flex justify-between items-center mb-2">
-                                         <span className="text-sm font-bold text-slate-600">Hebelfaktor</span>
-                                         <span className="text-xl font-black text-indigo-600">{item.nettoHebel.toFixed(2)} x</span>
+                                 <div className="pt-5 print:pt-3 border-t border-slate-100">
+                                     <div className="flex justify-between items-center mb-2 print:mb-1">
+                                         <span className="text-sm print:text-[11px] font-bold text-slate-600">Hebelfaktor</span>
+                                         <span className="text-xl print:text-base font-black text-indigo-600">{item.nettoHebel.toFixed(2)} x</span>
                                      </div>
-                                     <div className="text-xs text-slate-500 leading-tight">Aus <strong className="text-slate-600">{formatCurrency(item.summeNettoEinzahlung)}</strong> Netto-Einsatz werden insgesamt <strong className="text-slate-600">{formatCurrency(item.summeNettoAuszahlung)}</strong> Netto-Ertrag.</div>
+                                     <div className="text-xs print:text-[9px] text-slate-500 leading-tight">Aus <strong className="text-slate-600">{formatCurrency(item.summeNettoEinzahlung)}</strong> Netto-Einsatz werden insgesamt <strong className="text-slate-600">{formatCurrency(item.summeNettoAuszahlung)}</strong> Netto-Ertrag.</div>
                                  </div>
                                  
                                  {!item.isKapital ? (
-                                     <div className="pt-5 border-t border-slate-100">
-                                         <div className="flex justify-between items-center mb-2">
-                                             <span className="text-sm font-bold text-slate-600">Amortisation</span>
-                                             <span className="text-xl font-black text-slate-800">{item.amortisationsJahre.toFixed(1)} Jahre</span>
+                                     <div className="pt-5 print:pt-3 border-t border-slate-100">
+                                         <div className="flex justify-between items-center mb-2 print:mb-1">
+                                             <span className="text-sm print:text-[11px] font-bold text-slate-600">Amortisation</span>
+                                             <span className="text-xl print:text-base font-black text-slate-800">{item.amortisationsJahre.toFixed(1)} Jahre</span>
                                          </div>
-                                         <div className="text-xs text-slate-500 leading-tight">Nach {item.amortisationsJahre.toFixed(1)} Jahren Rentenbezug haben Sie Ihre Netto-Gesamteinzahlung von <strong className="text-slate-700">{formatCurrency(item.summeNettoEinzahlung)}</strong> komplett wieder zurückerhalten.</div>
+                                         <div className="text-xs print:text-[9px] text-slate-500 leading-tight">Nach {item.amortisationsJahre.toFixed(1)} Jahren Rentenbezug haben Sie Ihre Netto-Gesamteinzahlung von <strong className="text-slate-700">{formatCurrency(item.summeNettoEinzahlung)}</strong> komplett wieder zurückerhalten.</div>
                                      </div>
                                  ) : (
-                                     <div className="pt-5 border-t border-slate-100">
-                                         <div className="flex justify-between items-center mb-2">
-                                             <span className="text-sm font-bold text-slate-600">Netto-Gewinn</span>
-                                             <span className={`text-xl font-black ${item.echterNettoGewinn >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                     <div className="pt-5 print:pt-3 border-t border-slate-100">
+                                         <div className="flex justify-between items-center mb-2 print:mb-1">
+                                             <span className="text-sm print:text-[11px] font-bold text-slate-600">Netto-Gewinn</span>
+                                             <span className={`text-xl print:text-base font-black ${item.echterNettoGewinn >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                                                  {item.echterNettoGewinn >= 0 ? '+' : ''}{formatCurrency(item.echterNettoGewinn)}
                                              </span>
                                          </div>
-                                         <div className="text-xs text-slate-500 leading-tight">Zieht man Ihre gesamten Netto-Einzahlungen (<strong className="text-slate-700">{formatCurrency(item.summeNettoEinzahlung)}</strong>) vom Endkapital ab, bleibt dieser reine Gewinn nach Steuern zur freien Verfügung.</div>
+                                         <div className="text-xs print:text-[9px] text-slate-500 leading-tight">Zieht man Ihre gesamten Netto-Einzahlungen (<strong className="text-slate-700">{formatCurrency(item.summeNettoEinzahlung)}</strong>) vom Endkapital ab, bleibt dieser reine Gewinn nach Steuern zur freien Verfügung.</div>
                                      </div>
                                  )}
                              </div>
