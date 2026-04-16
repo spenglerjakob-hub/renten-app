@@ -3,7 +3,8 @@ import {
   Upload, FileText, TrendingUp, AlertCircle, Calculator, 
   CheckCircle, ChevronDown, ChevronUp, ShieldAlert, PiggyBank, 
   Briefcase, PlusCircle, Trash, Users, User, Info, Coins, Clock, Infinity as InfinityIcon, Wallet, Activity,
-  LineChart as LineChartIcon, List, Download, Home, Save, FolderOpen, Zap
+  LineChart as LineChartIcon, List, Download, Home, Save, FolderOpen, Zap,
+  Eye, Compass, Target, Search
 } from 'lucide-react';
 
 // Helper für Input-Zahlen: Lässt leere Strings zu, damit man Nullen (besonders am Handy) problemlos löschen kann
@@ -106,7 +107,7 @@ export default function App() {
   const [inflationRate, setInflationRate] = useState(2.0);
   const [taxIndexRate, setTaxIndexRate] = useState(1.0);
   const [solutionSavingsReturn, setSolutionSavingsReturn] = useState(5.0);
-  const [solutionSavingsDynamic, setSolutionSavingsDynamic] = useState(3.0);
+  const [solutionSavingsDynamic, setSolutionSavingsDynamic] = useState(0.0);
 
   // Verträge
   const [contracts, setContracts] = useState([]);
@@ -156,8 +157,8 @@ export default function App() {
            yearSalary = estimatorSalary * startRatio * Math.pow(1 + growthRate, age - startAge);
        }
        
-       const cappedSalary = Math.min(yearSalary, 101400); // Beitragsbemessungsgrenze 2026 West
-       totalPunkte += cappedSalary / 50493; // Durchschnittsentgelt 
+       const cappedSalary = Math.min(yearSalary, 101400); // Beitragsbemessungsgrenze 2026 
+       totalPunkte += cappedSalary / 51944; // Korrigiertes vorläufiges Durchschnittsentgelt 2026 
     }
     
     return Math.round(totalPunkte * 42.52); // Aktueller Rentenwert 2026
@@ -170,7 +171,7 @@ export default function App() {
   const [planerCapital, setPlanerCapital] = useState(0);
   const [planerDuration, setPlanerDuration] = useState(25);
   const [planerReturn, setPlanerReturn] = useState(3.0);
-  const [planerDynamic, setPlanerDynamic] = useState(2.0);
+  const [planerDynamic, setPlanerDynamic] = useState(0.0);
   const [includePlanerInNet, setIncludePlanerInNet] = useState(false);
 
   const fileInputRef = useRef(null);
@@ -183,17 +184,28 @@ export default function App() {
          setBirthDateA(formatted);
          if (formatted.length === 10) {
              const y = parseInt(formatted.substring(6, 10), 10);
-             const m = formatted.substring(3, 5);
-             const d = formatted.substring(0, 2);
-             setRetDateA(`${d}.${m}.${y + 67}`);
+             let m = parseInt(formatted.substring(3, 5), 10);
+             const d = parseInt(formatted.substring(0, 2), 10);
+             let retYear = y + 67;
+             
+             // Deutsche Renten-Logik: Rente beginnt am 1. des Folgemonats (außer man ist am 1. geboren)
+             if (d > 1) m += 1;
+             if (m > 12) { m = 1; retYear += 1; }
+             
+             setRetDateA(`01.${String(m).padStart(2, '0')}.${retYear}`);
          }
      } else {
          setBirthDateB(formatted);
          if (formatted.length === 10) {
              const y = parseInt(formatted.substring(6, 10), 10);
-             const m = formatted.substring(3, 5);
-             const d = formatted.substring(0, 2);
-             setRetDateB(`${d}.${m}.${y + 67}`);
+             let m = parseInt(formatted.substring(3, 5), 10);
+             const d = parseInt(formatted.substring(0, 2), 10);
+             let retYear = y + 67;
+             
+             if (d > 1) m += 1;
+             if (m > 12) { m = 1; retYear += 1; }
+             
+             setRetDateB(`01.${String(m).padStart(2, '0')}.${retYear}`);
          }
      }
   };
@@ -262,6 +274,7 @@ export default function App() {
 
         if (data.isMarried !== undefined) setIsMarried(data.isMarried);
         if (data.targetIncomeToday) setTargetIncomeToday(data.targetIncomeToday);
+        if (data.hasChurchTax !== undefined) setHasChurchTax(data.hasChurchTax); // <-- NEU: Kirchensteuer wird geladen
         if (data.currentNetIncome) setCurrentNetIncome(data.currentNetIncome);
         if (data.wageGrowthRate !== undefined) setWageGrowthRate(data.wageGrowthRate);
         if (data.hasChildren !== undefined) setHasChildren(data.hasChildren);
@@ -270,6 +283,7 @@ export default function App() {
         if (data.grvGrossB !== undefined) setGrvGrossB(data.grvGrossB);
         if (data.grvIncreaseRate !== undefined) setGrvIncreaseRate(data.grvIncreaseRate);
         if (data.inflationRate) setInflationRate(data.inflationRate);
+        if (data.taxIndexRate !== undefined) setTaxIndexRate(data.taxIndexRate); // <-- NEU: Tarif-Indexierung wird geladen
         if (data.solutionSavingsReturn !== undefined) setSolutionSavingsReturn(data.solutionSavingsReturn);
         if (data.solutionSavingsDynamic !== undefined) setSolutionSavingsDynamic(data.solutionSavingsDynamic);
         if (data.planerDuration !== undefined) setPlanerDuration(data.planerDuration);
@@ -311,7 +325,7 @@ export default function App() {
         if (c.id === id) {
             let updates = { type: newType, gross: c.gross || 0, payoutStrategy: 'rent' };
             if (newType === 'immobilie') { updates.costs = 20; updates.dynamic = 1.5; }
-            if (newType === 'etf') { updates.capital = 0; updates.monthly = 100; updates.returnAcc = 6.0; updates.returnWith = 2.0; updates.ter = 0.2; updates.duration = 25; updates.specialPayment = 0; updates.specialPaymentYear = new Date().getFullYear() + 10; updates.payoutStrategy = 'planer'; }
+            if (newType === 'etf') { updates.capital = 0; updates.monthly = 100; updates.returnAcc = 6.0; updates.returnWith = 0.0; updates.ter = 0.2; updates.duration = 25; updates.specialPayment = 0; updates.specialPaymentYear = new Date().getFullYear() + 10; updates.payoutStrategy = 'planer'; }
             return { ...c, ...updates };
         }
         return c;
@@ -634,7 +648,94 @@ export default function App() {
              s3_net += net;
         }
       }
-      return { ...c, net, tax, kist };
+
+      // --- NEU: WAHLRECHT-SIMULATOR (Vergleich Kapital vs. Rente) ---
+      let compareResult = null;
+      if (c.compareMode && c.compareRenteGross > 0 && c.compareCapitalGross > 0) {
+          const cRetYear = c.owner === 'B' && isMarried ? retirementYearB : retirementYearA;
+          const cRetAge = c.owner === 'B' && isMarried ? retirementAgeB : retirementAgeA;
+          const cErtRate = c.owner === 'B' && isMarried ? ertragsanteilRateB : ertragsanteilRateA;
+
+          let netRente = 0;
+          let netCapital = 0;
+
+          // Privat (Schicht 3)
+          if (c.type === 'prvRente' || c.type === 'prvKapital') {
+              // Option 1: Rente
+              let taxR = 0, kistR = 0, kvpvR = 0;
+              if (!c.isOldContract) {
+                  const taxableR = c.compareRenteGross * cErtRate;
+                  taxR = taxableR * avgTaxRate;
+                  kistR = taxR * kistRate;
+                  if (kvStatus === 'freiwillig') kvpvR = c.compareRenteGross * (kvRateFull + pvRateFull);
+              }
+              netRente = c.compareRenteGross - taxR - kistR - kvpvR;
+
+              // Option 2: Kapital
+              let taxC = 0, kistC = 0, kvpvC = 0;
+              const years = Math.max(0, cRetYear - (c.startYear || 2010));
+              let totalPremiums = 0;
+              let currPremium = (c.monthlyPremium || 100) * 12;
+              for (let i = 0; i < years; i++) { totalPremiums += currPremium; currPremium *= (1 + (c.dynamic || 0) / 100); }
+              const profit = Math.max(0, c.compareCapitalGross - totalPremiums);
+
+              if (!c.isOldContract) {
+                  const abgeltungRate = hasChurchTax ? 0.278186 : 0.26375;
+                  const taxAbgeltung = profit * 0.85 * abgeltungRate;
+                  const taxableProfit_today = (profit / taxInflationFactor) * 0.5 * 0.85;
+                  const taxHalb_today = calculateESt(zvE_yearly_today + taxableProfit_today, isMarried) - tax_today;
+                  const taxHalb = Math.max(0, taxHalb_today * taxInflationFactor);
+                  const kistHalb = taxHalb * kistRate;
+
+                  if ((taxHalb + kistHalb) < taxAbgeltung) { taxC = taxHalb; kistC = kistHalb; } 
+                  else { taxC = taxAbgeltung; }
+              }
+              if (kvStatus === 'freiwillig') kvpvC = profit * (kvRateFull + pvRateFull);
+              netCapital = c.compareCapitalGross - taxC - kistC - kvpvC;
+          }
+          // bAV (Schicht 2)
+          else if (c.type === 'bav' || c.type === 'bavKapital') {
+              // Option 1: Rente
+              let taxR = 0, kistR = 0, kvpvR = 0;
+              const taxableR = c.isOldContract ? c.compareRenteGross * cErtRate : c.compareRenteGross;
+              taxR = taxableR * avgTaxRate;
+              kistR = taxR * kistRate;
+              if (kvStatus === 'kvdr' || kvStatus === 'freiwillig') kvpvR = c.compareRenteGross * (kvRateFull + pvRateFull);
+              netRente = c.compareRenteGross - taxR - kistR - kvpvR;
+
+              // Option 2: Kapital
+              let taxC = 0, kistC = 0, kvpvC = 0;
+              if (!c.isOldContract) {
+                  const taxFuenftel_today = (calculateESt(zvE_yearly_today + (c.compareCapitalGross / taxInflationFactor / 5), isMarried) - tax_today) * 5;
+                  taxC = taxFuenftel_today * taxInflationFactor;
+                  kistC = taxC * kistRate;
+              }
+              const monthlyBavGross = c.compareCapitalGross / 120;
+              if (kvStatus === 'kvdr' || kvStatus === 'freiwillig') kvpvC = monthlyBavGross * (kvRateFull + pvRateFull) * 120;
+              netCapital = c.compareCapitalGross - taxC - kistC - kvpvC;
+          }
+
+          // --- Amortisations-Mathematik ---
+          const yearlyRente = netRente * 12;
+          const amortYears0 = yearlyRente > 0 ? netCapital / yearlyRente : 0;
+          
+          const r = 0.02; // 2% Anlagerendite
+          let amortYears2 = 0;
+          let isPerpetual = false;
+          if (yearlyRente > 0) {
+               if (yearlyRente <= netCapital * r) isPerpetual = true;
+               else amortYears2 = -Math.log(1 - (netCapital * r) / yearlyRente) / Math.log(1 + r);
+          }
+
+          compareResult = {
+              netRente, netCapital,
+              amortYears0, breakEvenAge0: cRetAge + amortYears0,
+              amortYears2, breakEvenAge2: cRetAge + amortYears2,
+              isPerpetual
+          };
+      }
+
+      return { ...c, net, tax, kist, compareResult };
     });
 
     // --- PLANER LOGIK NEU (Inkl. Abgeltungsteuer auf neue Gewinne) ---
@@ -800,111 +901,221 @@ export default function App() {
     return `${i === 0 ? 'M' : 'L'} ${cx} ${getY(isNaN(tgt) ? 0 : tgt)}`;
   }).join(" ");
 
-  const renderContractInput = (c) => (
-    <div key={c.id} className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm relative group mb-3 print:border-slate-300 print:shadow-none">
-      <button onClick={() => removeContract(c.id)} className="absolute top-3 right-3 text-slate-300 hover:text-rose-500 print:hidden"><Trash className="w-4 h-4" /></button>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3 pr-6">
-        <div>
-          <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Vertragsart</label>
-          <select value={c.type} onChange={e => handleContractTypeChange(c.id, e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm bg-slate-50">
-            {c.layer === 1 && <option value="basis">Rürup / Basisrente</option>}
-            {c.layer === 2 && <><option value="bav">bAV (Rente)</option><option value="bavKapital">bAV (Kapital)</option><option value="riester">Riester-Rente</option></>}
-            {c.layer === 3 && <><option value="prvRente">Private Rente (monatlich)</option><option value="prvKapital">Private Rente (Kapitalauszahlung)</option><option value="immobilie">Vermietung (Immobilie)</option><option value="etf">Freies Depot (ETF / Aktien)</option></>}
-          </select>
+  const renderContractInput = (c) => {
+    // BUGFIX: Wir holen uns hier das frisch berechnete Vertrags-Objekt aus der Steuer-Engine (inkl. compareResult)
+    const calcC = calculations.contracts.find(x => x.id === c.id) || c;
+    const isExpanded = c.isExpanded !== false; // Standardmäßig ausgeklappt
+    
+    const typeLabels = {
+      'basis': 'Rürup / Basisrente',
+      'bav': 'bAV (Rente)',
+      'bavKapital': 'bAV (Kapital)',
+      'riester': 'Riester-Rente',
+      'prvRente': 'Private Rente (monatlich)',
+      'prvKapital': 'Private Rente (Kapitalauszahlung)',
+      'immobilie': 'Vermietung (Immobilie)',
+      'etf': 'Freies Depot (ETF / Aktien)'
+    };
+
+    return (
+    <div key={c.id} className="bg-white border border-slate-200 rounded-lg shadow-sm mb-3 print:border-slate-300 print:shadow-none overflow-hidden">
+      
+      {/* COLLAPSIBLE HEADER (Hidden in Print) */}
+      <div 
+        className={`flex justify-between items-center p-3 cursor-pointer hover:bg-slate-50 transition-colors print:hidden ${isExpanded ? 'border-b border-slate-100 bg-slate-50/50' : ''}`}
+        onClick={() => updateContract(c.id, 'isExpanded', !isExpanded)}
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="bg-white border border-slate-200 shadow-sm p-1 rounded text-slate-500">
+            {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2">
+            <span className="text-[11px] sm:text-xs font-bold text-slate-700 uppercase tracking-wide">{typeLabels[c.type] || c.type}</span>
+            <span className="hidden sm:inline text-slate-300">|</span>
+            <span className="text-[11px] sm:text-xs text-slate-500 font-medium">{c.name || 'Neuer Vertrag'}</span>
+            {isMarried && <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded ml-1 font-bold uppercase tracking-wider">Person {c.owner || 'A'}</span>}
+          </div>
         </div>
-        <div><label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Bezeichnung</label><input type="text" value={c.name} onChange={e => updateContract(c.id, 'name', e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm" placeholder="z.B. Allianz" /></div>
+        <button onClick={(e) => { e.stopPropagation(); removeContract(c.id); }} className="text-slate-300 hover:text-rose-500 p-1.5 transition-colors rounded-md hover:bg-rose-50" title="Vertrag löschen">
+          <Trash className="w-4 h-4" />
+        </button>
       </div>
-      
-      {isMarried && (
-         <div className="mb-3 flex items-center gap-3 bg-slate-50 p-2 rounded w-max border border-slate-200">
-           <span className="text-[10px] font-bold text-slate-500 uppercase">Inhaber:</span>
-           <label className="flex items-center gap-1 text-xs font-semibold cursor-pointer"><input type="radio" checked={c.owner !== 'B'} onChange={() => updateContract(c.id, 'owner', 'A')} /> Person A</label>
-           <label className="flex items-center gap-1 text-xs font-semibold cursor-pointer"><input type="radio" checked={c.owner === 'B'} onChange={() => updateContract(c.id, 'owner', 'B')} /> Person B</label>
-         </div>
-      )}
 
-      {c.type !== 'immobilie' && c.type !== 'etf' && (
-        <div><label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">{c.type.includes('Kapital') ? 'Kapitalauszahlung (€ Brutto)' : 'Rente (€/Monat Brutto)'}</label><input type="number" value={c.gross ?? ''} onChange={e => updateContract(c.id, 'gross', parseNum(e.target.value))} className="w-full border border-slate-300 rounded p-2 text-sm font-semibold" /></div>
-      )}
-
-      {c.type === 'immobilie' && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Kaltmiete (€/M)</label><input type="number" value={c.gross ?? ''} onChange={e => updateContract(c.id, 'gross', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
-          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Instandhaltung (%)</label><input type="number" step="1" value={c.costs ?? 20} onChange={e => updateContract(c.id, 'costs', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-          <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Dyn. p.a. (%)</label><input type="number" step="0.1" value={c.dynamic ?? 1.5} onChange={e => updateContract(c.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-        </div>
-      )}
-
-      {c.type === 'etf' && (
-        <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Kapital heute (€)</label><input type="number" value={c.capital ?? ''} onChange={e => updateContract(c.id, 'capital', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Sparrate (€/M)</label><input type="number" value={c.monthly ?? ''} onChange={e => updateContract(c.id, 'monthly', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
-          </div>
-          <div className="bg-blue-50/50 p-2 rounded-lg border border-blue-100 print:bg-white print:border-slate-200">
-             <label className="block text-[10px] font-bold text-blue-800 mb-2 flex items-center gap-1"><Zap className="w-3 h-3"/> Geplante Sonderzahlung / Einmalanlage</label>
-             <div className="grid grid-cols-2 gap-3">
-               <div><label className="block text-[9px] text-slate-500 mb-1">Summe (€)</label><input type="number" value={c.specialPayment ?? ''} onChange={e => updateContract(c.id, 'specialPayment', parseNum(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs print:border-slate-300" placeholder="z.B. Erbe"/></div>
-               <div><label className="block text-[9px] text-slate-500 mb-1">Im Jahr</label><input type="number" value={c.specialPaymentYear ?? ''} onChange={e => updateContract(c.id, 'specialPaymentYear', parseNum(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs print:border-slate-300" /></div>
-             </div>
-          </div>
-          <div className="grid grid-cols-4 gap-2">
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Ansp.</label><input type="number" step="0.1" value={c.returnAcc ?? 6} onChange={e => updateContract(c.id, 'returnAcc', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Entn.</label><input type="number" step="0.1" value={c.returnWith ?? 2} onChange={e => updateContract(c.id, 'returnWith', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">TER (%)</label><input type="number" step="0.1" value={c.ter ?? 0.2} onChange={e => updateContract(c.id, 'ter', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-            <div><label className="block text-[10px] font-bold text-indigo-600 mb-1">Dauer Entn. (J)</label><input type="number" step="1" value={c.duration ?? 25} onChange={e => updateContract(c.id, 'duration', parseNum(e.target.value))} className="w-full border-2 border-indigo-300 rounded p-1.5 text-xs font-bold" /></div>
-          </div>
-          <div className="mt-3 pt-3 border-t border-slate-100">
-            <label className="block text-[10px] font-semibold text-slate-500 mb-2 uppercase">Auszahlungs-Strategie</label>
-            <select
-               value={c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')}
-               onChange={e => updateContract(c.id, 'payoutStrategy', e.target.value)}
-               className="w-full border border-slate-200 rounded p-1.5 text-xs bg-white font-medium text-slate-700"
-            >
-               <option value="rent">Mtl. Entnahme (ins Gesamt-Netto)</option>
-               <option value="planer">Kapital komplett in den Planer übertragen</option>
-               <option value="ignore">Ignorieren (Nur Kapitalwert anzeigen)</option>
+      {/* BODY (Always visible in Print) */}
+      <div className={`${isExpanded ? 'block' : 'hidden'} print:block p-4 relative`}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Vertragsart</label>
+            <select value={c.type} onChange={e => handleContractTypeChange(c.id, e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm bg-slate-50">
+              {c.layer === 1 && <option value="basis">Rürup / Basisrente</option>}
+              {c.layer === 2 && <><option value="bav">bAV (Rente)</option><option value="bavKapital">bAV (Kapital)</option><option value="riester">Riester-Rente</option></>}
+              {c.layer === 3 && <><option value="prvRente">Private Rente (monatlich)</option><option value="prvKapital">Private Rente (Kapitalauszahlung)</option><option value="immobilie">Vermietung (Immobilie)</option><option value="etf">Freies Depot (ETF / Aktien)</option></>}
             </select>
           </div>
+          <div><label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Bezeichnung</label><input type="text" value={c.name} onChange={e => updateContract(c.id, 'name', e.target.value)} className="w-full border border-slate-300 rounded p-2 text-sm" placeholder="z.B. Allianz" /></div>
         </div>
-      )}
+        
+        {isMarried && (
+           <div className="mb-3 flex items-center gap-3 bg-slate-50 p-2 rounded w-max border border-slate-200">
+             <span className="text-[10px] font-bold text-slate-500 uppercase">Inhaber:</span>
+             <label className="flex items-center gap-1 text-xs font-semibold cursor-pointer"><input type="radio" checked={c.owner !== 'B'} onChange={() => updateContract(c.id, 'owner', 'A')} /> Person A</label>
+             <label className="flex items-center gap-1 text-xs font-semibold cursor-pointer"><input type="radio" checked={c.owner === 'B'} onChange={() => updateContract(c.id, 'owner', 'B')} /> Person B</label>
+           </div>
+        )}
 
-      {(c.type === 'prvKapital' || c.type === 'bavKapital') && (
-        <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
-          {c.type === 'prvKapital' && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Beginn (J)</label><input type="number" value={c.startYear ?? ''} onChange={e => updateContract(c.id, 'startYear', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Beitrag (€)</label><input type="number" value={c.monthlyPremium ?? ''} onChange={e => updateContract(c.id, 'monthlyPremium', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Dyn. (%)</label><input type="number" step="0.1" value={c.dynamic ?? ''} onChange={e => updateContract(c.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+        {c.type !== 'immobilie' && c.type !== 'etf' && (
+          <div><label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">{c.type.includes('Kapital') ? 'Kapitalauszahlung (€ Brutto)' : 'Rente (€/Monat Brutto)'}</label><input type="number" value={c.gross ?? ''} onChange={e => updateContract(c.id, 'gross', parseNum(e.target.value))} className="w-full border border-slate-300 rounded p-2 text-sm font-semibold" /></div>
+        )}
+
+        {c.type === 'immobilie' && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Kaltmiete (€/M)</label><input type="number" value={c.gross ?? ''} onChange={e => updateContract(c.id, 'gross', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
+            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Instandhaltung (%)</label><input type="number" step="1" value={c.costs ?? 20} onChange={e => updateContract(c.id, 'costs', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+            <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Dyn. p.a. (%)</label><input type="number" step="0.1" value={c.dynamic ?? 1.5} onChange={e => updateContract(c.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+          </div>
+        )}
+
+        {c.type === 'etf' && (
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Kapital heute (€)</label><input type="number" value={c.capital ?? ''} onChange={e => updateContract(c.id, 'capital', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
+              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Sparrate (€/M)</label><input type="number" value={c.monthly ?? ''} onChange={e => updateContract(c.id, 'monthly', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
             </div>
-          )}
-          <div className="mt-1">
-            <label className="block text-[10px] font-semibold text-slate-500 mb-2 uppercase">Auszahlungs-Strategie</label>
-            <select
-               value={c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')}
-               onChange={e => updateContract(c.id, 'payoutStrategy', e.target.value)}
-               className="w-full border border-slate-200 rounded p-1.5 text-xs bg-white font-medium text-slate-700"
-            >
-               <option value="rent">In mtl. Rente umwandeln (ins Netto)</option>
-               <option value="planer">Netto-Kapital in den Planer übertragen</option>
-               <option value="ignore">Ignorieren (Nur Netto-Kapital anzeigen)</option>
-            </select>
+            <div className="bg-blue-50/50 rounded-lg border border-blue-100 overflow-hidden print:bg-white print:border-slate-200">
+               <button 
+                   onClick={() => updateContract(c.id, 'showSpecialPayment', !c.showSpecialPayment)}
+                   className="w-full p-2 flex justify-between items-center hover:bg-blue-100/50 transition-colors"
+               >
+                   <div className="text-[10px] font-bold text-blue-800 flex items-center gap-1.5">
+                       <Zap className="w-3 h-3"/> Geplante Sonderzahlung
+                       {c.specialPayment > 0 && !c.showSpecialPayment && <span className="bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded text-[8px] uppercase tracking-wider ml-1">Aktiv ({formatCurrency(c.specialPayment)})</span>}
+                   </div>
+                   {c.showSpecialPayment ? <ChevronUp className="w-3.5 h-3.5 text-blue-500" /> : <ChevronDown className="w-3.5 h-3.5 text-blue-500" />}
+               </button>
+               {c.showSpecialPayment && (
+                   <div className="p-2 pt-1 grid grid-cols-2 gap-3 border-t border-blue-100/50 print:border-slate-200">
+                     <div><label className="block text-[9px] text-slate-500 mb-1">Summe (€)</label><input type="number" value={c.specialPayment ?? ''} onChange={e => updateContract(c.id, 'specialPayment', parseNum(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs print:border-slate-300" placeholder="z.B. Erbe"/></div>
+                     <div><label className="block text-[9px] text-slate-500 mb-1">Im Jahr</label><input type="number" value={c.specialPaymentYear ?? ''} onChange={e => updateContract(c.id, 'specialPaymentYear', parseNum(e.target.value))} className="w-full border border-blue-200 bg-white rounded p-1.5 text-xs print:border-slate-300" /></div>
+                   </div>
+               )}
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Ansp.</label><input type="number" step="0.1" value={c.returnAcc ?? 6} onChange={e => updateContract(c.id, 'returnAcc', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Entn.</label><input type="number" step="0.1" value={c.returnWith ?? 2} onChange={e => updateContract(c.id, 'returnWith', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+              <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">TER (%)</label><input type="number" step="0.1" value={c.ter ?? 0.2} onChange={e => updateContract(c.id, 'ter', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+              <div><label className="block text-[10px] font-bold text-indigo-600 mb-1">Dauer Entn. (J)</label><input type="number" step="1" value={c.duration ?? 25} onChange={e => updateContract(c.id, 'duration', parseNum(e.target.value))} className="w-full border-2 border-indigo-300 rounded p-1.5 text-xs font-bold" /></div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-slate-100">
+              <label className="block text-[10px] font-semibold text-slate-500 mb-2 uppercase">Auszahlungs-Strategie</label>
+              <select
+                 value={c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')}
+                 onChange={e => updateContract(c.id, 'payoutStrategy', e.target.value)}
+                 className="w-full border border-slate-200 rounded p-1.5 text-xs bg-white font-medium text-slate-700"
+              >
+                 <option value="rent">Mtl. Entnahme (ins Gesamt-Netto)</option>
+                 <option value="planer">Kapital komplett in den Planer übertragen</option>
+                 <option value="ignore">Ignorieren (Nur Kapitalwert anzeigen)</option>
+              </select>
+            </div>
           </div>
-        </div>
-      )}
-      
-      {c.type === 'immobilie' && <div className="flex items-center gap-2 pt-3 border-t"><input type="checkbox" checked={c.includeInNet !== false} onChange={e => updateContract(c.id, 'includeInNet', e.target.checked)} className="rounded text-emerald-600 w-3 h-3" /><label className="text-[10px] text-slate-600 font-medium">In Gesamt-Netto übernehmen</label></div>}
+        )}
 
-      {(c.type === 'bav' || c.type === 'bavKapital' || c.type === 'prvRente' || c.type === 'prvKapital') && (
-        <div className="flex items-center gap-2 pt-3 mt-2 border-t border-slate-100">
-           <input type="checkbox" checked={!!c.isOldContract} onChange={e => updateContract(c.id, 'isOldContract', e.target.checked)} className="rounded text-indigo-600 w-3 h-3 cursor-pointer" id={`old-${c.id}`} />
-           <label htmlFor={`old-${c.id}`} className="text-[10px] text-slate-600 font-medium cursor-pointer">
-              Vertrag vor 2005 abgeschlossen (Steuerprivileg für Altverträge anwenden)
-           </label>
-        </div>
-      )}
+        {(c.type === 'prvKapital' || c.type === 'bavKapital') && (
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
+            {c.type === 'prvKapital' && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Beginn (J)</label><input type="number" value={c.startYear ?? ''} onChange={e => updateContract(c.id, 'startYear', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+                <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Beitrag (€)</label><input type="number" value={c.monthlyPremium ?? ''} onChange={e => updateContract(c.id, 'monthlyPremium', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+                <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Dyn. (%)</label><input type="number" step="0.1" value={c.dynamic ?? ''} onChange={e => updateContract(c.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
+              </div>
+            )}
+            <div className="mt-1">
+              <label className="block text-[10px] font-semibold text-slate-500 mb-2 uppercase">Auszahlungs-Strategie</label>
+              <select
+                 value={c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')}
+                 onChange={e => updateContract(c.id, 'payoutStrategy', e.target.value)}
+                 className="w-full border border-slate-200 rounded p-1.5 text-xs bg-white font-medium text-slate-700"
+              >
+                 <option value="rent">In mtl. Rente umwandeln (ins Netto)</option>
+                 <option value="planer">Netto-Kapital in den Planer übertragen</option>
+                 <option value="ignore">Ignorieren (Nur Netto-Kapital anzeigen)</option>
+              </select>
+            </div>
+          </div>
+        )}
+        
+        {c.type === 'immobilie' && <div className="flex items-center gap-2 pt-3 border-t"><input type="checkbox" checked={c.includeInNet !== false} onChange={e => updateContract(c.id, 'includeInNet', e.target.checked)} className="rounded text-emerald-600 w-3 h-3" /><label className="text-[10px] text-slate-600 font-medium">In Gesamt-Netto übernehmen</label></div>}
+
+        {/* WAHLRECHT SIMULATOR & ALTVERTRÄGE */}
+        {(c.type === 'bav' || c.type === 'bavKapital' || c.type === 'prvRente' || c.type === 'prvKapital') && (
+          <div className="mt-4 pt-3 border-t border-slate-100">
+             <div className="flex items-center gap-2 mb-2">
+                <input type="checkbox" checked={!!c.isOldContract} onChange={e => updateContract(c.id, 'isOldContract', e.target.checked)} className="rounded text-indigo-600 w-3 h-3 cursor-pointer" id={`old-${c.id}`} />
+                <label htmlFor={`old-${c.id}`} className="text-[10px] text-slate-600 font-medium cursor-pointer">
+                   Vertrag vor 2005 abgeschlossen (Steuerprivileg für Altverträge)
+                </label>
+             </div>
+             
+             <div className="flex items-center gap-2 mb-3">
+                <input type="checkbox" checked={!!c.compareMode} onChange={e => updateContract(c.id, 'compareMode', e.target.checked)} className="rounded text-emerald-600 w-3 h-3 cursor-pointer" id={`comp-${c.id}`} />
+                <label htmlFor={`comp-${c.id}`} className="text-[10px] text-slate-700 font-bold cursor-pointer">
+                   Wahlrecht simulieren (Vergleich: Rente vs. Kapital)
+                </label>
+             </div>
+
+             {c.compareMode && (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl mb-2">
+                   <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <label className="block text-xs text-slate-500 uppercase font-bold mb-1.5">Brutto-Rente mtl. (€)</label>
+                        <input type="number" value={c.compareRenteGross ?? ''} onChange={e => updateContract(c.id, 'compareRenteGross', parseNum(e.target.value))} className="w-full border border-slate-300 bg-white rounded-lg p-2.5 text-sm font-semibold" placeholder="z.B. 300" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 uppercase font-bold mb-1.5">Brutto-Kapital (€)</label>
+                        <input type="number" value={c.compareCapitalGross ?? ''} onChange={e => updateContract(c.id, 'compareCapitalGross', parseNum(e.target.value))} className="w-full border border-slate-300 bg-white rounded-lg p-2.5 text-sm font-semibold" placeholder="z.B. 100000" />
+                      </div>
+                   </div>
+
+                   {calcC.compareResult && (
+                      <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-sm mt-2">
+                         <div className="grid grid-cols-2 gap-4 pb-4 mb-4 border-b border-slate-100">
+                            <div>
+                              <div className="text-xs text-slate-500 font-bold uppercase mb-1">Erwartetes Netto-Kapital</div>
+                              <div className="font-black text-lg text-emerald-600">{formatCurrency(calcC.compareResult.netCapital)}</div>
+                            </div>
+                            <div>
+                              <div className="text-xs text-slate-500 font-bold uppercase mb-1">Erwartete Netto-Rente</div>
+                              <div className="font-black text-lg text-indigo-600">{formatCurrency(calcC.compareResult.netRente)} / M</div>
+                            </div>
+                         </div>
+                         
+                         <div className="space-y-3">
+                            <div className="bg-slate-50 p-3.5 rounded-xl flex gap-3 items-start">
+                               <Calculator className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+                               <div className="text-xs text-slate-700 leading-relaxed">
+                                  <span className="font-bold text-slate-900">1. Break-Even (0 % Zins):</span> Sie müssen ein Alter von <strong className="text-rose-600">{calcC.compareResult.breakEvenAge0.toFixed(1)} Jahren</strong> erreichen (noch {calcC.compareResult.amortYears0.toFixed(1)} Jahre ab Rente), damit die Summe der Netto-Renten das Netto-Kapital übersteigt.
+                               </div>
+                            </div>
+                            <div className="bg-indigo-50/50 p-3.5 rounded-xl flex gap-3 items-start border border-indigo-50">
+                               <TrendingUp className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" />
+                               <div className="text-xs text-indigo-900 leading-relaxed">
+                                  <span className="font-bold">2. Break-Even (2 % Anlage-Rendite):</span> 
+                                  {calcC.compareResult.isPerpetual 
+                                     ? " Das Kapital reicht ewig! Die 2 % Zinsen aus dem Kapital werfen bereits mehr Ertrag ab als die monatliche Rente. Die Rente rechnet sich finanziell nie." 
+                                     : <> Sie müssen ein Alter von <strong className="text-rose-600">{calcC.compareResult.breakEvenAge2.toFixed(1)} Jahren</strong> erreichen (noch {calcC.compareResult.amortYears2.toFixed(1)} Jahre ab Rente), um das verzinsliche Kapital zu übertreffen.</>}
+                               </div>
+                            </div>
+                         </div>
+                      </div>
+                   )}
+                </div>
+             )}
+          </div>
+        )}
+      </div>
     </div>
-  );
+    );
+  };
 
   // --- KASSENBON RENDER FUNKTION ---
   const renderBonContract = (c) => {
@@ -961,8 +1172,12 @@ export default function App() {
       <header className="sticky top-0 z-50 bg-slate-900 text-white p-4 shadow-md print:hidden">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
-            <ShieldAlert className="w-8 h-8 text-emerald-400" />
-            <div><h1 className="text-xl font-bold">Vorsorge-Analyzer Pro</h1><p className="text-slate-400 text-xs">Präzisions-Engine inkl. Indexierung, Splitting & Teilfreistellung</p></div>
+            {/* Hier können Sie Eye durch Compass, Target, Search oder PiggyBank austauschen */}
+            <Compass className="w-8 h-8 text-emerald-400" />
+            <div>
+              <h1 className="text-xl font-bold">JS-Rentenplaner Pro</h1>
+              <p className="text-slate-400 text-sm">Wir helfen Ihnen Ihre Rente klar zu sehen.</p>
+            </div>
           </div>
           <div className="flex bg-slate-800 p-1.5 rounded-lg border border-slate-700 gap-1.5 flex-wrap justify-center">
             <button onClick={() => setShowRealValue(!showRealValue)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${showRealValue ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Coins className="w-3 h-3" /> Kaufkraft heute</button>
@@ -1005,7 +1220,8 @@ export default function App() {
       {/* PRINT HEADER */}
       <div className="hidden print:block max-w-6xl mx-auto p-6 text-center border-b-2 border-slate-200 mb-6">
         <h2 className="text-2xl font-bold uppercase tracking-widest">Persönliches Vorsorge-Gutachten</h2>
-        <p className="text-slate-500 mt-2">Berechnet unter Berücksichtigung von Inflation ({inflationRate}%), Tarif-Indexierung & Splitting</p>
+        <p className="text-indigo-800 font-bold mt-1">Erstellt von Jakob Spengler</p>
+        <p className="text-slate-500 mt-2 text-lg">Wir helfen Ihnen Ihre Rente klar zu sehen.</p>
       </div>
 
       <main className="max-w-6xl mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 print:p-0 print:block">
