@@ -90,6 +90,10 @@ export default function App() {
   const [kvStatus, setKvStatus] = useState('kvdr'); 
   const [pkvPremium, setPkvPremium] = useState(600);
 
+  // Namen der Personen
+  const [nameA, setNameA] = useState('');
+  const [nameB, setNameB] = useState('');
+
   // Benchmark States für das Gehalt
   const [currentNetIncome, setCurrentNetIncome] = useState(2500);
   const [wageGrowthRate, setWageGrowthRate] = useState(2.0);
@@ -225,6 +229,7 @@ export default function App() {
   // --- EXPORT & IMPORT (Session Management) ---
   const handleExport = () => {
     const data = { 
+      nameA, nameB,
       isMarried, targetIncomeToday, hasChurchTax, hasChildren, kvStatus, pkvPremium, 
       currentNetIncome, wageGrowthRate,
       birthDateA, retDateA, grvGrossA, 
@@ -263,6 +268,9 @@ export default function App() {
             return str;
         };
 
+        if (data.nameA !== undefined) setNameA(data.nameA);
+        if (data.nameB !== undefined) setNameB(data.nameB);
+
         if (data.birthDateA) setBirthDateA(data.birthDateA);
         else if (data.birthMonthA) setBirthDateA(convertToNewFormat(data.birthMonthA));
         else if (data.currentAgeA) setBirthDateA(`01.01.${currentYear - data.currentAgeA}`);
@@ -281,7 +289,7 @@ export default function App() {
 
         if (data.isMarried !== undefined) setIsMarried(data.isMarried);
         if (data.targetIncomeToday) setTargetIncomeToday(data.targetIncomeToday);
-        if (data.hasChurchTax !== undefined) setHasChurchTax(data.hasChurchTax); // <-- NEU: Kirchensteuer wird geladen
+        if (data.hasChurchTax !== undefined) setHasChurchTax(data.hasChurchTax); 
         if (data.currentNetIncome) setCurrentNetIncome(data.currentNetIncome);
         if (data.wageGrowthRate !== undefined) setWageGrowthRate(data.wageGrowthRate);
         if (data.hasChildren !== undefined) setHasChildren(data.hasChildren);
@@ -290,7 +298,7 @@ export default function App() {
         if (data.grvGrossB !== undefined) setGrvGrossB(data.grvGrossB);
         if (data.grvIncreaseRate !== undefined) setGrvIncreaseRate(data.grvIncreaseRate);
         if (data.inflationRate) setInflationRate(data.inflationRate);
-        if (data.taxIndexRate !== undefined) setTaxIndexRate(data.taxIndexRate); // <-- NEU: Tarif-Indexierung wird geladen
+        if (data.taxIndexRate !== undefined) setTaxIndexRate(data.taxIndexRate); 
         if (data.solutionSavingsReturn !== undefined) setSolutionSavingsReturn(data.solutionSavingsReturn);
         if (data.solutionSavingsDynamic !== undefined) setSolutionSavingsDynamic(data.solutionSavingsDynamic);
         if (data.planerDuration !== undefined) setPlanerDuration(data.planerDuration);
@@ -308,6 +316,7 @@ export default function App() {
   };
 
   const loadDemoData = () => {
+    setNameA('Thomas'); setNameB('Anna');
     setBirthDateA('01.01.1995'); setBirthDateB('01.01.1993'); 
     setRetDateA('01.01.2062'); setRetDateB('01.01.2060'); 
     setGrvGrossA(2954); setGrvGrossB(0); setIsMarried(false); setKvStatus('kvdr'); setHasChurchTax(false); setHasChildren(true); setGrvIncreaseRate(1.5);
@@ -904,22 +913,18 @@ export default function App() {
   };
 
   const tuevData = useMemo(() => {
-     // 1. Automatische Ableitung der heutigen Steuern & Abgaben
-     // Verbesserte Heuristik: Singles ca. 65% Nettoquote, Verheiratete (Klasse 3) ca. 75%
      const derivedGrossToday = isMarried ? currentNetIncome / 0.75 : currentNetIncome / 0.65;
      const zvEToday = derivedGrossToday * 12 * 0.8; 
      const taxTodayYear = calculateESt(zvEToday, isMarried);
      
-     // Grenzsteuersatz berechnet die Belastung auf genau die nächsten 100€
      const marginalTaxNow = (calculateESt(zvEToday + 100, isMarried) - taxTodayYear) / 100;
      
-     // GENAUERE SV-BERECHNUNG (Berücksichtigung der Beitragsbemessungsgrenzen 2026)
      const BBG_KV_monthly = 5812.50; 
      const BBG_RV_monthly = 7550.00; 
      let svNow = 0;
-     if (derivedGrossToday < BBG_KV_monthly) svNow = 0.20; // Volle SV-Ersparnis (KV/PV + RV/AV)
-     else if (derivedGrossToday < BBG_RV_monthly) svNow = 0.106; // Nur RV/AV Ersparnis (~10,6%), da über KV-BBG
-     else svNow = 0.0; // Über allen Grenzen = keine SV-Ersparnis mehr
+     if (derivedGrossToday < BBG_KV_monthly) svNow = 0.20; 
+     else if (derivedGrossToday < BBG_RV_monthly) svNow = 0.106; 
+     else svNow = 0.0; 
 
      const taxRetirement = calculations.marginalTaxRate;
 
@@ -978,13 +983,11 @@ export default function App() {
          let summeNettoAuszahlung = 0;
 
          if (isKapital) {
-             // Kapitalauszahlung: Nutze direkt den exakten Netto-Kapitalwert aus der Main-Engine
              echteNettoKapital = calcC.netCapital || 0;
              kvPvAbzug = calcC.kvpv_deduction || 0;
              steuerAbzug = (calcC.tax || 0) + (calcC.kist || 0);
              summeNettoAuszahlung = echteNettoKapital;
          } else {
-             // Leibrente: Exakte Übernahme der monatlichen Netto-Werte aus der Haupt-Steuer-Engine!
              kvPvAbzug = calcC.kvpv_deduction || 0;
              steuerAbzug = (calcC.tax || 0) + (calcC.kist || 0);
              echteNettoRente = calcC.net || 0;
@@ -997,7 +1000,6 @@ export default function App() {
          const nettoHebel = summeNettoEinzahlung > 0 ? (summeNettoAuszahlung / summeNettoEinzahlung) : 0;
          const echterNettoGewinn = summeNettoAuszahlung - summeNettoEinzahlung;
 
-         // Iterative Berechnung des Internen Zinsfußes (IRR)
          let irr = 0;
          if (summeNettoEinzahlung > 0 && summeNettoAuszahlung > 0 && payoutGross > 0) {
              let minRate = -0.1;
@@ -1097,7 +1099,7 @@ export default function App() {
             <span className="text-[11px] sm:text-xs font-bold text-slate-700 uppercase tracking-wide">{typeLabels[c.type] || c.type}</span>
             <span className="hidden sm:inline text-slate-300">|</span>
             <span className="text-[11px] sm:text-xs text-slate-500 font-medium">{c.name || 'Neuer Vertrag'}</span>
-            {isMarried && <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded ml-1 font-bold uppercase tracking-wider">Person {c.owner || 'A'}</span>}
+            {isMarried && <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded ml-1 font-bold uppercase tracking-wider">{c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')}</span>}
           </div>
         </div>
         <button onClick={(e) => { e.stopPropagation(); removeContract(c.id); }} className="text-slate-300 hover:text-rose-500 p-1.5 transition-colors rounded-md hover:bg-rose-50" title="Vertrag löschen">
@@ -1122,8 +1124,8 @@ export default function App() {
         {isMarried && (
            <div className="mb-3 flex items-center gap-3 bg-slate-50 p-2 rounded w-max border border-slate-200">
              <span className="text-[10px] font-bold text-slate-500 uppercase">Inhaber:</span>
-             <label className="flex items-center gap-1 text-xs font-semibold cursor-pointer"><input type="radio" checked={c.owner !== 'B'} onChange={() => updateContract(c.id, 'owner', 'A')} /> Person A</label>
-             <label className="flex items-center gap-1 text-xs font-semibold cursor-pointer"><input type="radio" checked={c.owner === 'B'} onChange={() => updateContract(c.id, 'owner', 'B')} /> Person B</label>
+             <label className="flex items-center gap-1 text-xs font-semibold cursor-pointer"><input type="radio" checked={c.owner !== 'B'} onChange={() => updateContract(c.id, 'owner', 'A')} /> {nameA || 'Person A'}</label>
+             <label className="flex items-center gap-1 text-xs font-semibold cursor-pointer"><input type="radio" checked={c.owner === 'B'} onChange={() => updateContract(c.id, 'owner', 'B')} /> {nameB || 'Person B'}</label>
            </div>
         )}
 
@@ -1310,7 +1312,7 @@ export default function App() {
     return (
       <div key={c.id} className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
         <div className="flex justify-between items-center mb-1">
-          <div className="font-semibold text-sm text-blue-900">{c.name} {isMarried ? `(${c.owner})` : ''} {altvertragBadge}</div>
+          <div className="font-semibold text-sm text-blue-900">{c.name} {isMarried ? `(${c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})` : ''} {altvertragBadge}</div>
           <div className={`font-bold text-base ${strategy !== 'rent' ? 'text-slate-400' : 'text-slate-800'}`}>
             {strategy !== 'rent' ? '0 €' : renderBonVal(c.net || 0)}
           </div>
@@ -1334,71 +1336,104 @@ export default function App() {
       {/* HIER IST DER MAGISCHE BEFEHL: style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }} erzwingt den Druck in Web-Optik! */}
       
       {/* HEADER */}
-      <header className="sticky top-0 z-50 bg-slate-900 text-white p-3 sm:p-4 shadow-md print:hidden">
-        <div className="max-w-6xl mx-auto flex flex-col lg:flex-row items-center gap-4">
+      <header className={`sticky top-0 z-50 bg-slate-900 text-white shadow-md print:hidden transition-all duration-300 ease-in-out ${isHeaderCollapsed ? 'py-2' : 'p-3 sm:p-4'}`}>
+        <div className="max-w-6xl mx-auto relative flex items-center justify-center min-h-[40px]">
           
-          {/* Logo & Titel (LINKS - Mittig in der linken Hälfte) */}
-          <div className="flex items-center justify-center gap-4 sm:gap-6 w-full lg:w-1/2 shrink-0">
-            <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-14 h-14 sm:w-20 sm:h-20 shrink-0">
-              <rect x="15" y="60" width="16" height="25" rx="4" fill="#94A3B8" />
-              <rect x="42" y="40" width="16" height="45" rx="4" fill="#64748B" />
-              <rect x="69" y="20" width="16" height="65" rx="4" fill="#1E40AF" />
-              <path d="M10 50 L40 30 L60 40 L85 10" stroke="#10B981" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
-              <circle cx="85" cy="10" r="8" fill="#10B981" />
-            </svg>
-            <div className="text-left">
-              <h1 className="text-xl sm:text-3xl font-extrabold leading-tight tracking-tight">JS-Rentenplaner </h1>
-              <p className="text-slate-400 text-xs sm:text-base font-medium mt-0.5">Ihre Zukunft. Heute smart geplant.</p>
-            </div>
-          </div>
-          
-          {/* Controls (RECHTS - Zweizeilig) */}
-          <div className="flex flex-col gap-2 items-center lg:items-end w-full lg:w-1/2">
+          {/* TOGGLE BUTTON */}
+          <button 
+            onClick={() => setIsHeaderCollapsed(!isHeaderCollapsed)}
+            className="absolute right-0 p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-full transition-colors focus:outline-none z-10 shadow-sm border border-slate-700 mr-2 sm:mr-4"
+            title={isHeaderCollapsed ? "Menü ausklappen" : "Menü einklappen"}
+          >
+            {isHeaderCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+          </button>
+
+          {/* HEADER INHALT */}
+          <div className={`w-full flex transition-all duration-300 ${isHeaderCollapsed ? 'justify-center' : 'flex-col lg:flex-row items-center gap-4 pr-10 lg:pr-0'}`}>
             
-            {/* Obere Reihe: Einstellungen */}
-            <div className="flex bg-slate-800 p-1.5 rounded-lg border border-slate-700 gap-1.5 flex-wrap justify-center lg:justify-end">
-              <button onClick={() => setShowRealValue(!showRealValue)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${showRealValue ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Coins className="w-3 h-3" /> Kaufkraft heute</button>
-              <div className="w-px bg-slate-700 mx-1"></div>
-              
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white shadow">
-                <span>Infl.:</span><select value={inflationRate} onChange={e => setInflationRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer"><option value={0}>0 %</option><option value={1.5}>1,5 %</option><option value={2.0}>2,0 %</option><option value={2.5}>2,5 %</option></select>
+            {isHeaderCollapsed ? (
+              /* EINGEKLAPPTER ZUSTAND: Nur kleines Logo */
+              <div 
+                className="flex items-center justify-center cursor-pointer group" 
+                onClick={() => setIsHeaderCollapsed(false)} 
+                title="Klicken zum Ausklappen"
+              >
+                <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 transform group-hover:scale-110 transition-transform duration-200">
+                  <rect x="15" y="60" width="16" height="25" rx="4" fill="#94A3B8" />
+                  <rect x="42" y="40" width="16" height="45" rx="4" fill="#64748B" />
+                  <rect x="69" y="20" width="16" height="65" rx="4" fill="#1E40AF" />
+                  <path d="M10 50 L40 30 L60 40 L85 10" stroke="#10B981" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle cx="85" cy="10" r="8" fill="#10B981" />
+                </svg>
               </div>
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 text-white shadow">
-                <span>Index.:</span>
-                <select value={taxIndexRate} onChange={e => setTaxIndexRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer">
-                  <option value={0}>0 %</option>
-                  <option value={1.0}>1,0 %</option>
-                  <option value={1.5}>1,5 %</option>
-                  <option value={2.0}>2,0 %</option>
-                  {taxIndexRate !== '' && ![0, 1.0, 1.5, 2.0].includes(taxIndexRate) && <option value={taxIndexRate}>{taxIndexRate} %</option>}
-                </select>
-              </div>
-              <div className="w-px bg-slate-700 mx-1"></div>
+            ) : (
+              /* AUSGEKLAPPTER ZUSTAND: Voller Header */
+              <>
+                {/* Logo & Titel (LINKS - Mittig in der linken Hälfte) */}
+                <div className="flex items-center justify-center gap-4 sm:gap-6 w-full lg:w-1/2 shrink-0">
+                  <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-14 h-14 sm:w-20 sm:h-20 shrink-0">
+                    <rect x="15" y="60" width="16" height="25" rx="4" fill="#94A3B8" />
+                    <rect x="42" y="40" width="16" height="45" rx="4" fill="#64748B" />
+                    <rect x="69" y="20" width="16" height="65" rx="4" fill="#1E40AF" />
+                    <path d="M10 50 L40 30 L60 40 L85 10" stroke="#10B981" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+                    <circle cx="85" cy="10" r="8" fill="#10B981" />
+                  </svg>
+                  <div className="text-left">
+                    <h1 className="text-xl sm:text-3xl font-extrabold leading-tight tracking-tight">JS-Rentenplaner </h1>
+                    <p className="text-slate-400 text-xs sm:text-base font-medium mt-0.5">Ihre Zukunft. Heute smart geplant.</p>
+                  </div>
+                </div>
+                
+                {/* Controls (RECHTS - Zweizeilig) */}
+                <div className="flex flex-col gap-2 items-center lg:items-end w-full lg:w-1/2">
+                  
+                  {/* Obere Reihe: Einstellungen */}
+                  <div className="flex bg-slate-800 p-1.5 rounded-lg border border-slate-700 gap-1.5 flex-wrap justify-center lg:justify-end">
+                    <button onClick={() => setShowRealValue(!showRealValue)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${showRealValue ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Coins className="w-3 h-3" /> Kaufkraft heute</button>
+                    <div className="w-px bg-slate-700 mx-1"></div>
+                    
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white shadow">
+                      <span>Infl.:</span><select value={inflationRate} onChange={e => setInflationRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer"><option value={0}>0 %</option><option value={1.5}>1,5 %</option><option value={2.0}>2,0 %</option><option value={2.5}>2,5 %</option></select>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 text-white shadow">
+                      <span>Index.:</span>
+                      <select value={taxIndexRate} onChange={e => setTaxIndexRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer">
+                        <option value={0}>0 %</option>
+                        <option value={1.0}>1,0 %</option>
+                        <option value={1.5}>1,5 %</option>
+                        <option value={2.0}>2,0 %</option>
+                        {taxIndexRate !== '' && ![0, 1.0, 1.5, 2.0].includes(taxIndexRate) && <option value={taxIndexRate}>{taxIndexRate} %</option>}
+                      </select>
+                    </div>
+                    <div className="w-px bg-slate-700 mx-1"></div>
 
-              <button onClick={() => setIsMarried(false)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${!isMarried ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}><User className="w-3 h-3" /> Single</button>
-              <button onClick={() => setIsMarried(true)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${isMarried ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}><Users className="w-3 h-3" /> Verheiratet</button>
-            </div>
+                    <button onClick={() => setIsMarried(false)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${!isMarried ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}><User className="w-3 h-3" /> Single</button>
+                    <button onClick={() => setIsMarried(true)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${isMarried ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}><Users className="w-3 h-3" /> Verheiratet</button>
+                  </div>
 
-            {/* Untere Reihe: Aktionen & Export */}
-            <div className="flex bg-slate-800 p-1.5 rounded-lg border border-slate-700 gap-1.5 flex-wrap justify-center lg:justify-end">
-              <input type="file" accept=".json" ref={fileInputRef} onChange={handleImport} className="hidden" />
-              <button onClick={() => fileInputRef.current.click()} title="Profil laden" className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"><FolderOpen className="w-3.5 h-3.5" /> Laden</button>
-              <button onClick={handleExport} title="Profil speichern" className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"><Save className="w-3.5 h-3.5" /> Speichern</button>
-              
-              <div className="w-px bg-slate-700 mx-1"></div>
+                  {/* Untere Reihe: Aktionen & Export */}
+                  <div className="flex bg-slate-800 p-1.5 rounded-lg border border-slate-700 gap-1.5 flex-wrap justify-center lg:justify-end">
+                    <input type="file" accept=".json" ref={fileInputRef} onChange={handleImport} className="hidden" />
+                    <button onClick={() => fileInputRef.current.click()} title="Profil laden" className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"><FolderOpen className="w-3.5 h-3.5" /> Laden</button>
+                    <button onClick={handleExport} title="Profil speichern" className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"><Save className="w-3.5 h-3.5" /> Speichern</button>
+                    
+                    <div className="w-px bg-slate-700 mx-1"></div>
 
-              <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium bg-slate-800 border border-slate-700 text-white">
-                <span className="text-slate-400 hidden sm:inline">PDF-Text:</span>
-                <select value={printExplanationMode} onChange={e => setPrintExplanationMode(e.target.value)} className="bg-transparent font-bold outline-none cursor-pointer">
-                  <option value="none" className="text-slate-800">Ohne</option>
-                  <option value="short" className="text-slate-800">Kurz</option>
-                  <option value="long" className="text-slate-800">Ausführlich</option>
-                </select>
-              </div>
-              
-              <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-rose-600 text-white hover:bg-rose-500 shadow-sm ml-1 transition-colors"><Download className="w-3 h-3" /> PDF Export</button>
-            </div>
+                    <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium bg-slate-800 border border-slate-700 text-white">
+                      <span className="text-slate-400 hidden sm:inline">PDF-Text:</span>
+                      <select value={printExplanationMode} onChange={e => setPrintExplanationMode(e.target.value)} className="bg-transparent font-bold outline-none cursor-pointer">
+                        <option value="none" className="text-slate-800">Ohne</option>
+                        <option value="short" className="text-slate-800">Kurz</option>
+                        <option value="long" className="text-slate-800">Ausführlich</option>
+                      </select>
+                    </div>
+                    
+                    <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-rose-600 text-white hover:bg-rose-500 shadow-sm ml-1 transition-colors"><Download className="w-3 h-3" /> PDF Export</button>
+                  </div>
 
+                </div>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -1414,14 +1449,14 @@ export default function App() {
             <circle cx="85" cy="10" r="8" fill="#10B981" />
           </svg>
           <div className="text-left">
-            <h2 className="text-4xl font-extrabold tracking-tight text-slate-900 mb-1">JS-Rentenplaner Pro</h2>
-            <p className="text-slate-500 text-xl font-medium">Persönliches Vorsorge-Gutachten</p>
+            <h2 className="text-4xl font-extrabold tracking-tight text-slate-900 mb-1">JS-Rentenplaner </h2>
+            <p className="text-slate-500 text-xl font-medium">Ihre Zukunft. Heute smart geplant.</p>
           </div>
         </div>
         <div className="text-right">
           <div className="inline-block bg-slate-50 p-4 rounded-xl border border-slate-200 text-left">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Auswertung für</p>
-            <p className="text-lg font-black text-slate-800">Person {isMarried ? 'A & B (Haushalt)' : 'A'}</p>
+            <p className="text-lg font-black text-slate-800">{isMarried ? `${nameA || 'Person A'} & ${nameB || 'Person B'} (Haushalt)` : (nameA || 'Person A')}</p>
             <p className="text-xs text-slate-500 mt-2 border-t border-slate-200 pt-2 font-medium flex justify-between gap-4">
               <span>Datum:</span> <span className="font-bold text-slate-700">{new Date().toLocaleDateString('de-DE')}</span>
             </p>
@@ -1474,7 +1509,7 @@ export default function App() {
                               <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${c.layer === 1 ? 'bg-blue-100 text-blue-700' : c.layer === 2 ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'}`}>Schicht {c.layer}</span>
                            </td>
                            <td className="p-4 uppercase text-[11px] font-bold text-slate-500">{c.type.replace('prvKapital', 'Privat (Kapital)').replace('prvRente', 'Privat (Rente)').replace('bavKapital', 'bAV (Kapital)')}</td>
-                           <td className="p-4 font-bold text-slate-700">{c.name} {isMarried ? <span className="text-slate-400 font-normal">({c.owner})</span> : ''}</td>
+                           <td className="p-4 font-bold text-slate-700">{c.name} {isMarried ? <span className="text-slate-400 font-normal">({c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})</span> : ''}</td>
                            <td className="p-4 text-sm font-black text-right text-slate-800">
                               {c.type === 'etf' ? `${formatCurrency(c.capital)}` : 
                                c.type.includes('Kapital') ? `${formatCurrency(c.gross)}` :
@@ -1494,26 +1529,38 @@ export default function App() {
         <div className="lg:col-span-6 xl:col-span-5 space-y-6 print:hidden">
           
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 print:shadow-none print:border-none print:p-0">
-            <h2 className="text-sm font-bold mb-4 text-slate-700 border-b border-slate-100 pb-2 print:text-lg print:text-indigo-900 print:border-indigo-200">Allgemeine Daten & Ziel</h2>
+            <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-2 print:border-indigo-200">
+              <h2 className="text-sm font-bold text-slate-700 print:text-lg print:text-indigo-900">Allgemeine Daten & Ziel</h2>
+              <div className="flex items-center gap-2 print:hidden">
+                <label className="text-[10px] text-slate-400 font-bold uppercase hidden sm:block">Name:</label>
+                <input 
+                  type="text" 
+                  value={personTab === 'A' ? nameA : nameB} 
+                  onChange={e => personTab === 'A' ? setNameA(e.target.value) : setNameB(e.target.value)} 
+                  placeholder={personTab === 'A' ? 'Person A' : 'Person B'}
+                  className="w-28 sm:w-36 border border-slate-200 rounded px-2 py-1 text-xs bg-slate-50 focus:bg-white focus:border-indigo-400 outline-none transition-colors"
+                />
+              </div>
+            </div>
             
             {isMarried && (
               <div className="flex bg-slate-100 p-1 rounded-lg mb-4 print:hidden">
-                 <button onClick={()=>setPersonTab('A')} className={`flex-1 py-1.5 text-xs font-bold rounded ${personTab==='A' ? 'bg-white shadow text-indigo-700':'text-slate-500'}`}>Person A</button>
-                 <button onClick={()=>setPersonTab('B')} className={`flex-1 py-1.5 text-xs font-bold rounded ${personTab==='B' ? 'bg-white shadow text-indigo-700':'text-slate-500'}`}>Person B</button>
+                 <button onClick={()=>setPersonTab('A')} className={`flex-1 py-1.5 text-xs font-bold rounded truncate px-2 ${personTab==='A' ? 'bg-white shadow text-indigo-700':'text-slate-500'}`}>{nameA || 'Person A'}</button>
+                 <button onClick={()=>setPersonTab('B')} className={`flex-1 py-1.5 text-xs font-bold rounded truncate px-2 ${personTab==='B' ? 'bg-white shadow text-indigo-700':'text-slate-500'}`}>{nameB || 'Person B'}</button>
               </div>
             )}
 
             {/* PERSON DATA MAPPING */}
             {['A', 'B'].filter(p => p === 'A' || isMarried).map(p => (
               <div key={`person-data-${p}`} className={`${personTab === p ? 'block' : 'hidden'} print:block mb-4`}>
-                <h3 className="hidden print:block text-sm font-bold text-slate-700 mb-2 border-b border-slate-100 pb-1">Daten Person {p}</h3>
+                <h3 className="hidden print:block text-sm font-bold text-slate-700 mb-2 border-b border-slate-100 pb-1">Daten {p === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')}</h3>
                 <div className="grid grid-cols-2 gap-4 mb-2">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Geburtsdatum {isMarried ? `(Person ${p})` : ''}</label>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Geburtsdatum {isMarried ? `(${p === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})` : ''}</label>
                     <input type="text" placeholder="TT.MM.JJJJ" value={p === 'A' ? birthDateA : birthDateB} onChange={e => handleBirthDateChange(e.target.value, p)} className="w-full border rounded p-2 text-sm" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Rentenbeginn {isMarried ? `(Person ${p})` : ''}</label>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Rentenbeginn {isMarried ? `(${p === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})` : ''}</label>
                     <input type="text" placeholder="TT.MM.JJJJ" value={p === 'A' ? retDateA : retDateB} onChange={e => handleRetDateChange(e.target.value, p)} className="w-full border rounded p-2 text-sm" />
                   </div>
                 </div>
@@ -1603,7 +1650,7 @@ export default function App() {
                   {['A', 'B'].filter(p => p === 'A' || isMarried).map(p => (
                     <div key={`grv-${p}`} className={`${personTab === p ? 'block' : 'hidden'} print:block print:mb-4 bg-white p-4 rounded-lg border border-blue-200 shadow-sm relative print:border-slate-300 print:shadow-none`}>
                       <h3 className="text-sm font-bold text-blue-800 mb-3 flex items-center justify-between print:text-slate-800">
-                        <span className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 print:text-slate-500" /> Gesetzliche Rente {isMarried ? `(Person ${p})` : ''}</span>
+                        <span className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 print:text-slate-500" /> Gesetzliche Rente {isMarried ? `(${p === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})` : ''}</span>
                         <button onClick={() => estimatorPerson === p ? setEstimatorPerson(null) : openEstimator(p)} className="print:hidden text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 flex items-center gap-1 transition-colors">
                           <Calculator className="w-3 h-3"/> {estimatorPerson === p ? 'Schließen' : 'Schätzen'}
                         </button>
@@ -2125,44 +2172,44 @@ export default function App() {
                                  </div>
                              </div>
 
-                             {/* MIDDLE COLUMN: Einzahlung vs Auszahlung */}
-                             <div className={`w-full lg:w-2/5 print:w-2/5 p-5 print:p-4 flex flex-col justify-center gap-5 print:gap-4 border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-slate-100 ${item.payoutGross === 0 ? 'pt-12 print:pt-10' : ''}`}>
+                             {/* MIDDLE COLUMN: Einzahlung vs Auszahlung (Hier wurde die Typographie präzise auf 10px / 12px justiert) */}
+                             <div className={`w-full lg:w-2/5 print:w-2/5 p-5 print:p-4 flex flex-col justify-center gap-4 print:gap-3 border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-slate-100 ${item.payoutGross === 0 ? 'pt-12 print:pt-10' : ''}`}>
                                  {/* Results: Einzahlung */}
-                                 <div className="bg-slate-50 rounded-xl print:rounded-lg p-4 print:p-3 border border-slate-200">
-                                     <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 print:mb-2">Ihre echte Belastung (Ansparphase)</div>
-                                     <div className="space-y-1.5 print:space-y-1 mb-3 print:mb-2">
-                                         <div className="flex justify-between text-xs text-slate-500"><span>Brutto-Beitrag:</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
-                                         {item.agZuschuss > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>AG-Zuschuss:</span> <span>- {formatCurrency(item.agZuschuss)}</span></div>}
-                                         {item.zulagenMonatlich > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>Zulagen:</span> <span>- {formatCurrency(item.zulagenMonatlich)}</span></div>}
-                                         {item.steuerErsparnis > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>Steuer-Vorteil:</span> <span>- {formatCurrency(item.steuerErsparnis)}</span></div>}
-                                         {item.svErsparnis > 0 && <div className="flex justify-between text-xs text-emerald-600"><span>SV-Ersparnis:</span> <span>- {formatCurrency(item.svErsparnis)}</span></div>}
+                                 <div className="bg-slate-50 rounded-xl print:rounded-lg p-3 print:p-2.5 border border-slate-200">
+                                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Ihre echte Belastung (Ansparphase)</div>
+                                     <div className="space-y-1 mb-2">
+                                         <div className="flex justify-between text-[10px] text-slate-500"><span>Brutto-Beitrag:</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
+                                         {item.agZuschuss > 0 && <div className="flex justify-between text-[10px] text-emerald-600"><span>AG-Zuschuss:</span> <span>- {formatCurrency(item.agZuschuss)}</span></div>}
+                                         {item.zulagenMonatlich > 0 && <div className="flex justify-between text-[10px] text-emerald-600"><span>Zulagen:</span> <span>- {formatCurrency(item.zulagenMonatlich)}</span></div>}
+                                         {item.steuerErsparnis > 0 && <div className="flex justify-between text-[10px] text-emerald-600"><span>Steuer-Vorteil:</span> <span>- {formatCurrency(item.steuerErsparnis)}</span></div>}
+                                         {item.svErsparnis > 0 && <div className="flex justify-between text-[10px] text-emerald-600"><span>SV-Ersparnis:</span> <span>- {formatCurrency(item.svErsparnis)}</span></div>}
                                      </div>
-                                     <div className="flex justify-between items-end border-t border-slate-200 pt-2.5 print:pt-2">
-                                         <div className="text-xs font-bold text-slate-800">Echter Netto-Aufwand:</div>
+                                     <div className="flex justify-between items-end border-t border-slate-200 pt-2">
+                                         <div className="text-[10px] font-bold text-slate-800">Echter Netto-Aufwand:</div>
                                          <div className="text-right">
-                                             <div className="text-lg print:text-base font-black text-slate-800">{formatCurrency(item.echterNettoAufwand)} <span className="text-[10px] font-normal text-slate-500">/ M</span></div>
-                                             <div className="text-[10px] text-slate-500 font-medium mt-0.5 print:mt-0">Gesamt bis Rente: {formatCurrency(item.summeNettoEinzahlung)}</div>
+                                             <div className="text-xs font-black text-slate-800">{formatCurrency(item.echterNettoAufwand)} <span className="text-[10px] font-normal text-slate-500">/ M</span></div>
+                                             <div className="text-[10px] text-slate-500 font-medium">Gesamt bis Rente: {formatCurrency(item.summeNettoEinzahlung)}</div>
                                          </div>
                                      </div>
                                  </div>
 
                                  {/* Results: Auszahlung */}
-                                 <div className="bg-amber-50 rounded-xl print:rounded-lg p-4 print:p-3 border border-amber-200">
-                                     <div className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-3 print:mb-2">Ihr echter Ertrag (Auszahlungsphase)</div>
-                                     <div className="space-y-1.5 print:space-y-1 mb-3 print:mb-2">
-                                         <div className="flex justify-between text-xs text-slate-600"><span>Brutto {item.isKapital ? 'Kapital' : 'Rente'}:</span> <span className="font-bold">{formatCurrency(item.payoutGross)}</span></div>
-                                         {!item.isKapital && item.kvPvAbzug > 0 && <div className="flex justify-between text-xs text-rose-500"><span>KV/PV-Abzug:</span> <span>- {formatCurrency(item.kvPvAbzug)}</span></div>}
-                                         {!item.isKapital && item.steuerAbzug > 0 && <div className="flex justify-between text-xs text-rose-500"><span>Steuer-Abzug:</span> <span>- {formatCurrency(item.steuerAbzug)}</span></div>}
-                                         {item.isKapital && <div className="text-[10px] text-rose-500 text-right italic mt-1 print:mt-0.5">Steuern/Abgaben bereits von Engine abgezogen</div>}
+                                 <div className="bg-amber-50 rounded-xl print:rounded-lg p-3 print:p-2.5 border border-amber-200">
+                                     <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-2">Ihr echter Ertrag (Auszahlungsphase)</div>
+                                     <div className="space-y-1 mb-2">
+                                         <div className="flex justify-between text-[10px] text-slate-600"><span>Brutto {item.isKapital ? 'Kapital' : 'Rente'}:</span> <span className="font-bold">{formatCurrency(item.payoutGross)}</span></div>
+                                         {!item.isKapital && item.kvPvAbzug > 0 && <div className="flex justify-between text-[10px] text-rose-500"><span>KV/PV-Abzug:</span> <span>- {formatCurrency(item.kvPvAbzug)}</span></div>}
+                                         {!item.isKapital && item.steuerAbzug > 0 && <div className="flex justify-between text-[10px] text-rose-500"><span>Steuer-Abzug:</span> <span>- {formatCurrency(item.steuerAbzug)}</span></div>}
+                                         {item.isKapital && <div className="text-[10px] text-rose-500 text-right italic mt-0.5">Steuern/Abgaben bereits abgezogen</div>}
                                      </div>
-                                     <div className="flex justify-between items-end border-t border-amber-200 pt-2.5 print:pt-2">
-                                         <div className="text-xs font-bold text-amber-900">Echtes Netto {item.isKapital ? 'Kapital' : '(Mtl.)'}:</div>
+                                     <div className="flex justify-between items-end border-t border-amber-200 pt-2">
+                                         <div className="text-[10px] font-bold text-amber-900">Echtes Netto {item.isKapital ? 'Kapital' : '(Mtl.)'}:</div>
                                          <div className="text-right">
-                                             <div className="text-2xl print:text-xl font-black text-amber-600">
+                                             <div className="text-xs font-black text-amber-600">
                                                  {formatCurrency(item.isKapital ? item.echteNettoKapital : item.echteNettoRente)}
                                              </div>
                                              {!item.isKapital && (
-                                                 <div className="text-[10px] text-amber-700/80 font-medium mt-0.5 print:mt-0">Gesamt in Rente: {formatCurrency(item.summeNettoAuszahlung)}</div>
+                                                 <div className="text-[10px] text-amber-700/80 font-medium">Gesamt in Rente: {formatCurrency(item.summeNettoAuszahlung)}</div>
                                              )}
                                          </div>
                                      </div>
