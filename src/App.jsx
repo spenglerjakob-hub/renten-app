@@ -1220,7 +1220,6 @@ export default function App() {
       {/* PRINT HEADER */}
       <div className="hidden print:block max-w-6xl mx-auto p-6 text-center border-b-2 border-slate-200 mb-6">
         <h2 className="text-2xl font-bold uppercase tracking-widest">Persönliches Vorsorge-Gutachten</h2>
-        <p className="text-indigo-800 font-bold mt-1">Erstellt von Jakob Spengler</p>
         <p className="text-slate-500 mt-2 text-lg">Wir helfen Ihnen Ihre Rente klar zu sehen.</p>
       </div>
 
