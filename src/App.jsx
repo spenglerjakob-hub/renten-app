@@ -7,7 +7,7 @@ import {
   Eye, Compass, Target, Search, Percent, SearchCheck, ArrowRight
 } from 'lucide-react';
 
-// Helper für Input-Zahlen: Lässt leere Strings zu, damit man Nullen (besonders am Handy) problemlos löschen kann
+// Helper für Input-Zahlen
 const parseNum = (val) => val === '' ? '' : Number(val);
 
 // --- STEUER-ENGINE (EStG Formel Approximation 2026) ---
@@ -38,7 +38,7 @@ const getGrvAbschlag = (retAgeExact) => {
   return Math.min(0.144, monthsEarly * 0.003);
 };
 
-// Helper für exakte Datumsdifferenzen inkl. Tag, Monat, Jahr
+// Helper für exakte Datumsdifferenzen
 const parseDateValues = (str) => {
     if (!str) return null;
     if (str.includes('.')) {
@@ -67,7 +67,6 @@ const getCurrentDateStr = () => {
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
 };
 
-// Input-Maske: Setzt automatisch die Punkte DD.MM.YYYY
 const formatDateInput = (value) => {
   const cleaned = value.replace(/\D/g, '');
   let formatted = '';
@@ -78,7 +77,6 @@ const formatDateInput = (value) => {
 };
 
 export default function App() {
-  // --- STATE FÜR DIE KOPFZEILE ---
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
 
   // --- STATE MANAGEMENT ---
@@ -90,33 +88,29 @@ export default function App() {
   const [kvStatus, setKvStatus] = useState('kvdr'); 
   const [pkvPremium, setPkvPremium] = useState(600);
 
-  // Namen der Personen
   const [nameA, setNameA] = useState('');
   const [nameB, setNameB] = useState('');
 
-  // Benchmark States für das Gehalt
-  const [currentNetIncome, setCurrentNetIncome] = useState(2500);
+  // --- NEU: Zentrales Gehalts-Modul ---
+  const [salaryInputMode, setSalaryInputMode] = useState('netto');
+  const [salaryInputValue, setSalaryInputValue] = useState(2500);
+  const [salaryMultiplier, setSalaryMultiplier] = useState(12);
+
   const [wageGrowthRate, setWageGrowthRate] = useState(2.0);
 
-  // Person A
   const [birthDateA, setBirthDateA] = useState('01.01.1995');
   const [retDateA, setRetDateA] = useState('01.01.2062');
   const [grvGrossA, setGrvGrossA] = useState(0);
   
-  // Person B (Partner)
   const [birthDateB, setBirthDateB] = useState('01.01.1991');
   const [retDateB, setRetDateB] = useState('01.01.2058');
   const [grvGrossB, setGrvGrossB] = useState(0);
 
   const [grvIncreaseRate, setGrvIncreaseRate] = useState(0);
-
-  // Indexierung & Makro
   const [inflationRate, setInflationRate] = useState(2.0);
   const [taxIndexRate, setTaxIndexRate] = useState(1.0);
   const [solutionSavingsReturn, setSolutionSavingsReturn] = useState(5.0);
   const [solutionSavingsDynamic, setSolutionSavingsDynamic] = useState(0.0);
-
-  // Verträge
   const [contracts, setContracts] = useState([]);
 
   // UI States
@@ -131,10 +125,27 @@ export default function App() {
   const [printExplanationMode, setPrintExplanationMode] = useState('short'); 
   const [manualChartStart, setManualChartStart] = useState(null); 
 
-  // --- VERTRAGS-TÜV (PROFITABILITÄTS-CHECK) STATES ---
+  // --- VERTRAGS-TÜV STATES ---
   const [tuevItems, setTuevItems] = useState([]);
 
-  // --- RENTEN-SCHÄTZER STATES & LOGIK ---
+  // ... (TÜV Helper Functions bleiben identisch)
+  const addTuevItem = (contractId) => {
+      const c = contracts.find(x => x.id === parseInt(contractId));
+      if (!c) return;
+      const currentYear = new Date().getFullYear();
+      const newItem = {
+          id: Date.now(), contractId: c.id, grossMonthly: c.monthlyPremium || c.monthly || 100, dynamic: c.dynamic || 0,
+          subsidyBav: 50, subsidyRiester: 175, children: [], startDate: `01.01.${currentYear}`, lifeExpectancy: 85
+      };
+      setTuevItems(prev => [...prev, newItem]);
+  };
+  const updateTuevItem = (id, field, value) => setTuevItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
+  const removeTuevItem = (id) => setTuevItems(prev => prev.filter(item => item.id !== id));
+  const addTuevChild = (tuevId) => setTuevItems(prev => prev.map(item => item.id === tuevId ? { ...item, children: [...(item.children || []), { id: Date.now(), birthYear: new Date().getFullYear() }] } : item));
+  const updateTuevChild = (tuevId, childId, field, value) => setTuevItems(prev => prev.map(item => item.id === tuevId ? { ...item, children: item.children.map(c => c.id === childId ? { ...c, [field]: value } : c) } : item));
+  const removeTuevChild = (tuevId, childId) => setTuevItems(prev => prev.map(item => item.id === tuevId ? { ...item, children: item.children.filter(c => c.id !== childId) } : item));
+
+  // --- RENTEN-SCHÄTZER ---
   const [estimatorPerson, setEstimatorPerson] = useState(null);
   const [estimatorSalary, setEstimatorSalary] = useState(50000);
 
@@ -143,40 +154,30 @@ export default function App() {
     const birthDate = estimatorPerson === 'A' ? birthDateA : birthDateB;
     const retDate = estimatorPerson === 'A' ? retDateA : retDateB;
     const currentMonth = getCurrentDateStr();
-    
     const currentAge = Math.max(0, diffInYears(birthDate, currentMonth));
     const retAge = Math.max(0, diffInYears(birthDate, retDate));
-    
     let totalPunkte = 0;
     const startAge = 22;
     const endAge = Math.floor(retAge);
     
     if (endAge <= startAge) return 0;
-    
-    // Karriere-Kurve: Gehalt steigt von 22 bis exakt zum *heutigen* Alter
     const growthEndAge = Math.max(startAge, Math.floor(currentAge));
     const yearsOfGrowth = growthEndAge - startAge;
     
     for (let age = startAge; age < endAge; age++) {
        let yearSalary = estimatorSalary;
-       
        if (age < growthEndAge && yearsOfGrowth > 0) {
-           // Einstiegsgehalt = 50% vom heutigen Zielgehalt, exponentielles Wachstum
            const startRatio = 0.5;
            const growthRate = Math.pow(1 / startRatio, 1 / yearsOfGrowth) - 1;
            yearSalary = estimatorSalary * startRatio * Math.pow(1 + growthRate, age - startAge);
        }
-       
-       const cappedSalary = Math.min(yearSalary, 101400); // Beitragsbemessungsgrenze 2026 
-       totalPunkte += cappedSalary / 51944; // Korrigiertes vorläufiges Durchschnittsentgelt 2026 
+       const cappedSalary = Math.min(yearSalary, 101400); 
+       totalPunkte += cappedSalary / 51944; 
     }
-    
-    return Math.round(totalPunkte * 42.52); // Aktueller Rentenwert 2026
+    return Math.round(totalPunkte * 42.52); 
   }, [estimatorSalary, estimatorPerson, birthDateA, birthDateB, retDateA, retDateB]);
 
-  const openEstimator = (person) => {
-    setEstimatorPerson(person);
-  };
+  const openEstimator = (person) => setEstimatorPerson(person);
 
   const [planerCapital, setPlanerCapital] = useState(0);
   const [planerDuration, setPlanerDuration] = useState(25);
@@ -197,11 +198,8 @@ export default function App() {
              let m = parseInt(formatted.substring(3, 5), 10);
              const d = parseInt(formatted.substring(0, 2), 10);
              let retYear = y + 67;
-             
-             // Deutsche Renten-Logik: Rente beginnt am 1. des Folgemonats (außer man ist am 1. geboren)
              if (d > 1) m += 1;
              if (m > 12) { m = 1; retYear += 1; }
-             
              setRetDateA(`01.${String(m).padStart(2, '0')}.${retYear}`);
          }
      } else {
@@ -211,10 +209,8 @@ export default function App() {
              let m = parseInt(formatted.substring(3, 5), 10);
              const d = parseInt(formatted.substring(0, 2), 10);
              let retYear = y + 67;
-             
              if (d > 1) m += 1;
              if (m > 12) { m = 1; retYear += 1; }
-             
              setRetDateB(`01.${String(m).padStart(2, '0')}.${retYear}`);
          }
      }
@@ -226,17 +222,13 @@ export default function App() {
      else setRetDateB(formatted);
   };
 
-  // --- EXPORT & IMPORT (Session Management) ---
   const handleExport = () => {
     const data = { 
-      nameA, nameB,
-      isMarried, targetIncomeToday, hasChurchTax, hasChildren, kvStatus, pkvPremium, 
-      currentNetIncome, wageGrowthRate,
-      birthDateA, retDateA, grvGrossA, 
-      birthDateB, retDateB, grvGrossB, 
-      grvIncreaseRate, inflationRate, taxIndexRate, 
-      solutionSavingsReturn, solutionSavingsDynamic, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet,
-      tuevItems
+      nameA, nameB, isMarried, targetIncomeToday, hasChurchTax, hasChildren, kvStatus, pkvPremium, 
+      salaryInputMode, salaryInputValue, salaryMultiplier, wageGrowthRate, 
+      birthDateA, retDateA, grvGrossA, birthDateB, retDateB, grvGrossB, 
+      grvIncreaseRate, inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic, contracts, 
+      planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet, tuevItems
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -257,7 +249,6 @@ export default function App() {
       try {
         const data = JSON.parse(event.target.result);
         const currentYear = new Date().getFullYear();
-
         const convertToNewFormat = (str) => {
             if (!str) return '';
             if (str.includes('.')) return str;
@@ -270,27 +261,24 @@ export default function App() {
 
         if (data.nameA !== undefined) setNameA(data.nameA);
         if (data.nameB !== undefined) setNameB(data.nameB);
-
         if (data.birthDateA) setBirthDateA(data.birthDateA);
-        else if (data.birthMonthA) setBirthDateA(convertToNewFormat(data.birthMonthA));
-        else if (data.currentAgeA) setBirthDateA(`01.01.${currentYear - data.currentAgeA}`);
-
         if (data.retDateA) setRetDateA(data.retDateA);
-        else if (data.retMonthA) setRetDateA(convertToNewFormat(data.retMonthA));
-        else if (data.retirementAgeA && data.currentAgeA) setRetDateA(`01.01.${currentYear + (data.retirementAgeA - data.currentAgeA)}`);
-
         if (data.birthDateB) setBirthDateB(data.birthDateB);
-        else if (data.birthMonthB) setBirthDateB(convertToNewFormat(data.birthMonthB));
-        else if (data.currentAgeB) setBirthDateB(`01.01.${currentYear - data.currentAgeB}`);
-
         if (data.retDateB) setRetDateB(data.retDateB);
-        else if (data.retMonthB) setRetDateB(convertToNewFormat(data.retMonthB));
-        else if (data.retirementAgeB && data.currentAgeB) setRetDateB(`01.01.${currentYear + (data.retirementAgeB - data.currentAgeB)}`);
-
         if (data.isMarried !== undefined) setIsMarried(data.isMarried);
         if (data.targetIncomeToday) setTargetIncomeToday(data.targetIncomeToday);
         if (data.hasChurchTax !== undefined) setHasChurchTax(data.hasChurchTax); 
-        if (data.currentNetIncome) setCurrentNetIncome(data.currentNetIncome);
+        
+        // --- Gehalts-Import Kompatibilität ---
+        if (data.salaryInputMode) setSalaryInputMode(data.salaryInputMode);
+        if (data.salaryInputValue) setSalaryInputValue(data.salaryInputValue);
+        if (data.salaryMultiplier) setSalaryMultiplier(data.salaryMultiplier);
+        if (data.currentNetIncome && !data.salaryInputValue) {
+            setSalaryInputMode('netto');
+            setSalaryInputValue(data.currentNetIncome);
+            setSalaryMultiplier(12);
+        }
+
         if (data.wageGrowthRate !== undefined) setWageGrowthRate(data.wageGrowthRate);
         if (data.hasChildren !== undefined) setHasChildren(data.hasChildren);
         if (data.contracts) setContracts(data.contracts);
@@ -302,29 +290,11 @@ export default function App() {
         if (data.solutionSavingsReturn !== undefined) setSolutionSavingsReturn(data.solutionSavingsReturn);
         if (data.solutionSavingsDynamic !== undefined) setSolutionSavingsDynamic(data.solutionSavingsDynamic);
         if (data.planerDuration !== undefined) setPlanerDuration(data.planerDuration);
-        if (data.planerWithdrawal !== undefined && !data.planerDuration) setPlanerDuration(25);
-        
-        // TÜV Daten laden (falls vorhanden)
         if (data.tuevItems !== undefined) setTuevItems(data.tuevItems);
-        
         alert("Profil erfolgreich geladen!");
-      } catch (err) {
-        alert("Fehler beim Laden der Datei. Bitte prüfen Sie das Format.");
-      }
+      } catch (err) { alert("Fehler beim Laden der Datei. Bitte prüfen Sie das Format."); }
     };
     reader.readAsText(file);
-  };
-
-  const loadDemoData = () => {
-    setNameA('Thomas'); setNameB('Anna');
-    setBirthDateA('01.01.1995'); setBirthDateB('01.01.1993'); 
-    setRetDateA('01.01.2062'); setRetDateB('01.01.2060'); 
-    setGrvGrossA(2954); setGrvGrossB(0); setIsMarried(false); setKvStatus('kvdr'); setHasChurchTax(false); setHasChildren(true); setGrvIncreaseRate(1.5);
-    setContracts([
-      { id: 2, layer: 2, type: 'bav', name: 'Neuer Vertrag', gross: 27, owner: 'A', payoutStrategy: 'rent' },
-      { id: 3, layer: 2, type: 'riester', name: 'Neuer Vertrag', gross: 295, owner: 'A', payoutStrategy: 'rent' },
-      { id: 8, layer: 3, type: 'etf', name: 'Neuer Vertrag', capital: 18000, monthly: 550, returnAcc: 6.0, returnWith: 2.0, ter: 0.2, duration: 25, payoutStrategy: 'planer', owner: 'A' }
-    ]);
   };
 
   const addContract = (layer) => {
@@ -351,7 +321,56 @@ export default function App() {
     }));
   };
 
-  // --- BERECHNUNGSLOGIK (Inkl. Person A & B) ---
+  // --- ZENTRALE GEHALTS BERECHNUNG ---
+  const currentFinancials = useMemo(() => {
+    let annualGross = 0;
+    let annualNet = 0;
+    let avgMonthlyNet = 0;
+    let avgMonthlyGross = 0;
+    let zvEToday = 0;
+
+    if (salaryInputMode === 'brutto') {
+        annualGross = (salaryInputValue || 0) * (salaryMultiplier || 12);
+        
+        // SV Berechnung (Approx 2026 Limits)
+        const BBG_KV = 5812.50 * 12; 
+        const BBG_RV = 7550.00 * 12; 
+        
+        let sv_kvpv = 0;
+        if (kvStatus === 'pkv') {
+            sv_kvpv = (pkvPremium || 0) * 12;
+        } else {
+            const kvpvRate = 0.073 + (hasChildren ? 0.017 : 0.022) + 0.008; // Arbeitnehmeranteil
+            sv_kvpv = Math.min(annualGross, BBG_KV) * kvpvRate;
+        }
+        const rvavRate = 0.093 + 0.013; 
+        const sv_rvav = Math.min(annualGross, BBG_RV) * rvavRate;
+        
+        const totalSv = sv_kvpv + sv_rvav;
+        const werbungskosten = 1230; 
+        
+        // Exaktes ZvE für Steuer Engine
+        zvEToday = Math.max(0, annualGross - werbungskosten - totalSv);
+        
+        const tax = calculateESt(zvEToday, isMarried);
+        const kist = hasChurchTax ? tax * 0.08 : 0;
+        
+        annualNet = annualGross - totalSv - tax - kist;
+        avgMonthlyNet = annualNet / 12;
+        avgMonthlyGross = annualGross / 12;
+    } else {
+        // Fallback: Netto-Eingabe (Rückrechnung)
+        annualNet = (salaryInputValue || 0) * (salaryMultiplier || 12);
+        avgMonthlyNet = annualNet / 12;
+        avgMonthlyGross = isMarried ? avgMonthlyNet * 1.35 : avgMonthlyNet * 1.55;
+        annualGross = avgMonthlyGross * 12;
+        zvEToday = annualGross * 0.82; // Approximation ZvE
+    }
+
+    return { annualGross, annualNet, avgMonthlyNet, avgMonthlyGross, zvEToday };
+  }, [salaryInputMode, salaryInputValue, salaryMultiplier, isMarried, hasChurchTax, hasChildren, kvStatus, pkvPremium]);
+
+  // --- BERECHNUNGSLOGIK (Engine) ---
   const calculations = useMemo(() => {
     const currentMonth = getCurrentDateStr();
     const currentYear = new Date().getFullYear();
@@ -369,8 +388,8 @@ export default function App() {
     const inflationFactor = Math.pow(1 + inflationRate / 100, maxYearsToRet);
     const targetIncomeFuture = targetIncomeToday * inflationFactor; 
     
-    // Letztes Netto vor der Rente prognostizieren
-    const projectedFinalNet = currentNetIncome * Math.pow(1 + wageGrowthRate / 100, maxYearsToRet);
+    // Nutzt jetzt das präzise berechnete avgMonthlyNet
+    const projectedFinalNet = currentFinancials.avgMonthlyNet * Math.pow(1 + wageGrowthRate / 100, maxYearsToRet);
     
     const getYearFromStr = (str) => {
         const vals = parseDateValues(str);
@@ -396,7 +415,6 @@ export default function App() {
     const bavFreibetragKV = 197.75 * wageGrowthFactor; 
     const BBG_KV = 5812.50 * wageGrowthFactor; 
 
-    // GRV Abschläge anwenden
     const grvFutureGrossA_raw = grvGrossA * Math.pow(1 + grvIncreaseRate / 100, yearsToRetA);
     const grvFutureGrossA = grvFutureGrossA_raw * (1 - getGrvAbschlag(retirementAgeA));
     
@@ -428,13 +446,10 @@ export default function App() {
       remainingBBG -= grvBeitragspflichtig;
     }
 
-    // 1. DURCHLAUF: ZvE und KV/PV Basis berechnen (OHNE Steuern & Auszahlungsstrategie-Verteilung)
     const processedContracts = contracts.map(c => {
       let zvE_contribution = 0;
       let kvpv_deduction = 0;
       let incomeForKV = 0;
-      const cRetAge = c.owner === 'B' && isMarried ? retirementAgeB : retirementAgeA;
-      const cYearsToRet = c.owner === 'B' && isMarried ? yearsToRetB : yearsToRetA;
       const cRetYear = c.owner === 'B' && isMarried ? retirementYearB : retirementYearA;
       const cErtRate = c.owner === 'B' && isMarried ? ertragsanteilRateB : ertragsanteilRateA;
       const cTaxBase = c.owner === 'B' && isMarried ? taxBasePercentB : taxBasePercentA;
@@ -444,7 +459,6 @@ export default function App() {
         if (kvStatus === 'freiwillig') incomeForKV = Number(c.gross);
       } 
       else if (c.type === 'bav') {
-        // Altverträge (§40b EStG) werden in der Auszahlungsphase privilegiert nur mit dem Ertragsanteil besteuert
         zvE_contribution = c.isOldContract ? Number(c.gross) * cErtRate : Number(c.gross); 
         if (kvStatus === 'kvdr') {
           const bav_kv = Math.max(0, c.gross - bavFreibetragKV) * kvRateFull;
@@ -482,7 +496,6 @@ export default function App() {
                 cap += (c.monthly || 0) * months;
             }
         }
-        
         if (c.specialPayment > 0 && c.specialPaymentYear > currentYear) {
             const yearsInvested = baseRetYear - c.specialPaymentYear;
             if (yearsInvested > 0) cap += c.specialPayment * Math.pow(1 + (netReturnAcc/100), yearsInvested);
@@ -496,15 +509,13 @@ export default function App() {
 
         let grossMonthly = 0;
         if (duration > 0) {
-            if (r_w === 0) {
-                grossMonthly = cap / (duration * 12);
-            } else {
+            if (r_w === 0) grossMonthly = cap / (duration * 12);
+            else {
                 const W_yearly = cap * (r_w / (1 - Math.pow(1 + r_w, -duration)));
                 grossMonthly = W_yearly / 12;
             }
         }
         c.grossMonthly = grossMonthly;
-
         if (kvStatus === 'freiwillig') incomeForKV = grossMonthly;
       }
 
@@ -519,7 +530,6 @@ export default function App() {
       return { ...c, zvE_contribution, kvpv_deduction, cRetYear };
     });
 
-    // --- STEUER-ENGINE ---
     const taxInflationFactor = wageGrowthFactor;
     const zvE_yearly_nominal = Math.max(0, zvE_total * 12 - (deductible_kvpv * 12));
     const zvE_yearly_today = zvE_yearly_nominal / taxInflationFactor;
@@ -537,9 +547,8 @@ export default function App() {
     let s1_net = grvNet;
     let s2_net = 0;
     let s3_net = 0;
-    let transferredCapital = 0; // Sammelbecken für den Planer
+    let transferredCapital = 0;
 
-    // 2. DURCHLAUF: Steuern & Auszahlungsstrategie-Verteilung anwenden
     const finalizedContracts = processedContracts.map(c => {
       let net = 0, tax = 0, kist = 0;
       const strategy = c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent');
@@ -565,7 +574,6 @@ export default function App() {
           remainingBBG -= anrechenbar;
         }
         
-        // Altvertrag (§40b): 100% steuerfrei, aber KV/PV fällt an!
         if (c.isOldContract) {
             tax = 0; kist = 0; c.appliedTaxMethod = 'Steuerfrei (Altvertrag)';
         } else {
@@ -578,12 +586,8 @@ export default function App() {
         c.kvpv_deduction = monthlyKvPv * 120;
         c.netCapital = Math.max(0, c.gross - tax - kist - c.kvpv_deduction);
         
-        if (strategy === 'planer') {
-            transferredCapital += c.netCapital;
-        } else if (strategy === 'rent') {
-            net = (c.netCapital * ((c.withdrawalRate || 4) / 100)) / 12; 
-            s2_net += net;
-        }
+        if (strategy === 'planer') transferredCapital += c.netCapital;
+        else if (strategy === 'rent') { net = (c.netCapital * ((c.withdrawalRate || 4) / 100)) / 12; s2_net += net; }
       }
       else if (c.type === 'prvKapital') {
         let totalPremiums = 0;
@@ -593,19 +597,15 @@ export default function App() {
         const profit = Math.max(0, c.gross - totalPremiums);
         
         if (c.isOldContract) {
-            // Altvertrag (Abschluss vor 2005): Komplett steuerfrei
             tax = 0; kist = 0; c.appliedTaxMethod = 'Steuerfrei (Altvertrag)';
         } else {
-            // BUGFIX: Echte Progressionsberechnung statt pauschalem Grenzsteuersatz
-            const taxableProfit_today = (profit / taxInflationFactor) * 0.5 * 0.85; // 50% Halbeinkünfte + 15% Teilfreistellung
+            const taxableProfit_today = (profit / taxInflationFactor) * 0.5 * 0.85; 
             const taxHalb_today = calculateESt(zvE_yearly_today + taxableProfit_today, isMarried) - tax_today;
-            const taxHalb = Math.max(0, taxHalb_today * taxInflationFactor); // Wieder aufplustern mit Indexierung
+            const taxHalb = Math.max(0, taxHalb_today * taxInflationFactor); 
             const kistHalb = taxHalb * kistRate;
-            
             const abgeltungRate = hasChurchTax ? 0.278186 : 0.26375;
-            const taxAbgeltung = profit * 0.85 * abgeltungRate; // 15% Teilfreistellung
+            const taxAbgeltung = profit * 0.85 * abgeltungRate; 
             
-            // Günstigerprüfung
             if ((taxHalb + kistHalb) < taxAbgeltung) { tax = taxHalb; kist = kistHalb; c.appliedTaxMethod = 'Halbeinkünfte'; } 
             else { tax = taxAbgeltung; kist = 0; c.appliedTaxMethod = 'Abgeltungsteuer'; }
         }
@@ -619,12 +619,8 @@ export default function App() {
         c.kvpv_deduction = monthlyKvPv * 120;
         c.netCapital = Math.max(0, c.gross - tax - kist - c.kvpv_deduction);
         
-        if (strategy === 'planer') {
-            transferredCapital += c.netCapital;
-        } else if (strategy === 'rent') {
-            net = (c.netCapital * ((c.withdrawalRate || 4) / 100)) / 12;
-            s3_net += net;
-        }
+        if (strategy === 'planer') transferredCapital += c.netCapital;
+        else if (strategy === 'rent') { net = (c.netCapital * ((c.withdrawalRate || 4) / 100)) / 12; s3_net += net; }
       }
       else if (c.type === 'immobilie') {
         tax = c.taxableRent * avgTaxRate;
@@ -637,7 +633,6 @@ export default function App() {
         const totalInvested = (c.capital || 0) + ((c.monthly || 0) * months) + (c.specialPaymentYear <= baseRetYear ? (c.specialPayment || 0) : 0);
         const duration = c.duration !== undefined ? c.duration : 25;
         
-        // Lump-Sum Taxation (für Planer oder Ignoriert)
         const profitLump = Math.max(0, c.totalCap - totalInvested);
         const capTaxableBase = profitLump * 0.7; 
         let capTax = capTaxableBase * 0.25; 
@@ -646,155 +641,49 @@ export default function App() {
         c.netCapital = Math.max(0, c.totalCap - capTax - capKist);
 
         if (strategy === 'planer' || strategy === 'ignore') {
-             tax = capTax; 
-             kist = capKist;
+             tax = capTax; kist = capKist;
              if (strategy === 'planer') transferredCapital += c.netCapital;
         } else if (strategy === 'rent') {
-             // Präzise Versteuerung bei monatlicher Entnahme über die Laufzeit
              const totalPayout = c.grossMonthly * 12 * duration;
              const totalProfit = Math.max(0, totalPayout - totalInvested);
              const profitRatio = totalPayout > 0 ? (totalProfit / totalPayout) : 0;
-             
              const taxableProfitPortion = c.grossMonthly * profitRatio;
-             const taxableBase = taxableProfitPortion * 0.7; // 30% Teilfreistellung
-             
+             const taxableBase = taxableProfitPortion * 0.7; 
              tax = taxableBase * 0.25; 
              kist = hasChurchTax ? taxableBase * 0.08 : 0;
-             const soli = tax * 0.055;
-             tax += soli;
-             
+             tax += tax * 0.055;
              net = c.grossMonthly - c.kvpv_deduction - tax - kist;
              s3_net += net;
         }
       }
 
-      // --- NEU: WAHLRECHT-SIMULATOR (Vergleich Kapital vs. Rente) ---
-      let compareResult = null;
-      if (c.compareMode && c.compareRenteGross > 0 && c.compareCapitalGross > 0) {
-          const cRetYear = c.owner === 'B' && isMarried ? retirementYearB : retirementYearA;
-          const cRetAge = c.owner === 'B' && isMarried ? retirementAgeB : retirementAgeA;
-          const cErtRate = c.owner === 'B' && isMarried ? ertragsanteilRateB : ertragsanteilRateA;
-
-          let netRente = 0;
-          let netCapital = 0;
-
-          // Privat (Schicht 3)
-          if (c.type === 'prvRente' || c.type === 'prvKapital') {
-              // Option 1: Rente
-              let taxR = 0, kistR = 0, kvpvR = 0;
-              if (!c.isOldContract) {
-                  const taxableR = c.compareRenteGross * cErtRate;
-                  taxR = taxableR * avgTaxRate;
-                  kistR = taxR * kistRate;
-                  if (kvStatus === 'freiwillig') kvpvR = c.compareRenteGross * (kvRateFull + pvRateFull);
-              }
-              netRente = c.compareRenteGross - taxR - kistR - kvpvR;
-
-              // Option 2: Kapital
-              let taxC = 0, kistC = 0, kvpvC = 0;
-              const years = Math.max(0, cRetYear - (c.startYear || 2010));
-              let totalPremiums = 0;
-              let currPremium = (c.monthlyPremium || 100) * 12;
-              for (let i = 0; i < years; i++) { totalPremiums += currPremium; currPremium *= (1 + (c.dynamic || 0) / 100); }
-              const profit = Math.max(0, c.compareCapitalGross - totalPremiums);
-
-              if (!c.isOldContract) {
-                  const abgeltungRate = hasChurchTax ? 0.278186 : 0.26375;
-                  const taxAbgeltung = profit * 0.85 * abgeltungRate;
-                  const taxableProfit_today = (profit / taxInflationFactor) * 0.5 * 0.85;
-                  const taxHalb_today = calculateESt(zvE_yearly_today + taxableProfit_today, isMarried) - tax_today;
-                  const taxHalb = Math.max(0, taxHalb_today * taxInflationFactor);
-                  const kistHalb = taxHalb * kistRate;
-
-                  if ((taxHalb + kistHalb) < taxAbgeltung) { taxC = taxHalb; kistC = kistHalb; } 
-                  else { taxC = taxAbgeltung; }
-              }
-              if (kvStatus === 'freiwillig') kvpvC = profit * (kvRateFull + pvRateFull);
-              netCapital = c.compareCapitalGross - taxC - kistC - kvpvC;
-          }
-          // bAV (Schicht 2)
-          else if (c.type === 'bav' || c.type === 'bavKapital') {
-              // Option 1: Rente
-              let taxR = 0, kistR = 0, kvpvR = 0;
-              const taxableR = c.isOldContract ? c.compareRenteGross * cErtRate : c.compareRenteGross;
-              taxR = taxableR * avgTaxRate;
-              kistR = taxR * kistRate;
-              if (kvStatus === 'kvdr' || kvStatus === 'freiwillig') kvpvR = c.compareRenteGross * (kvRateFull + pvRateFull);
-              netRente = c.compareRenteGross - taxR - kistR - kvpvR;
-
-              // Option 2: Kapital
-              let taxC = 0, kistC = 0, kvpvC = 0;
-              if (!c.isOldContract) {
-                  const taxFuenftel_today = (calculateESt(zvE_yearly_today + (c.compareCapitalGross / taxInflationFactor / 5), isMarried) - tax_today) * 5;
-                  taxC = taxFuenftel_today * taxInflationFactor;
-                  kistC = taxC * kistRate;
-              }
-              const monthlyBavGross = c.compareCapitalGross / 120;
-              if (kvStatus === 'kvdr' || kvStatus === 'freiwillig') kvpvC = monthlyBavGross * (kvRateFull + pvRateFull) * 120;
-              netCapital = c.compareCapitalGross - taxC - kistC - kvpvC;
-          }
-
-          // --- Amortisations-Mathematik ---
-          const yearlyRente = netRente * 12;
-          const amortYears0 = yearlyRente > 0 ? netCapital / yearlyRente : 0;
-          
-          const r = 0.02; // 2% Anlagerendite
-          let amortYears2 = 0;
-          let isPerpetual = false;
-          if (yearlyRente > 0) {
-               if (yearlyRente <= netCapital * r) isPerpetual = true;
-               else amortYears2 = -Math.log(1 - (netCapital * r) / yearlyRente) / Math.log(1 + r);
-          }
-
-          compareResult = {
-              netRente, netCapital,
-              amortYears0, breakEvenAge0: cRetAge + amortYears0,
-              amortYears2, breakEvenAge2: cRetAge + amortYears2,
-              isPerpetual
-          };
-      }
-
-      return { ...c, net, tax, kist, compareResult };
+      return { ...c, net, tax, kist };
     });
 
-    // --- PLANER LOGIK NEU (Inkl. Abgeltungsteuer auf neue Gewinne) ---
     const effectivePlanerCapital = Number(planerCapital) + transferredCapital;
-    let finalPlanerWithdrawalGross = 0;
-    let finalPlanerWithdrawalNet = 0;
-    let planerTax = 0;
-    let planerKist = 0;
+    let finalPlanerWithdrawalGross = 0, finalPlanerWithdrawalNet = 0, planerTax = 0, planerKist = 0;
 
     if (effectivePlanerCapital > 0 && planerDuration > 0) {
         const r_p = planerReturn / 100;
         const d_p = planerDynamic / 100;
-        if (Math.abs(r_p - d_p) < 0.0001) {
-            finalPlanerWithdrawalGross = effectivePlanerCapital / (planerDuration * 12);
-        } else {
-            const R = 1 + r_p;
-            const D = 1 + d_p;
+        if (Math.abs(r_p - d_p) < 0.0001) finalPlanerWithdrawalGross = effectivePlanerCapital / (planerDuration * 12);
+        else {
+            const R = 1 + r_p, D = 1 + d_p;
             const W1_yearly = effectivePlanerCapital * ((R - D) / (1 - Math.pow(D/R, planerDuration)));
             finalPlanerWithdrawalGross = W1_yearly / 12;
         }
 
-        // Steuern auf die *neuen* Zinsen im Planer berechnen
-        let totalPayout = 0;
-        let currentW = finalPlanerWithdrawalGross * 12;
-        for(let i=0; i<planerDuration; i++) {
-            totalPayout += currentW;
-            currentW *= (1 + d_p);
-        }
-
+        let totalPayout = 0, currentW = finalPlanerWithdrawalGross * 12;
+        for(let i=0; i<planerDuration; i++) { totalPayout += currentW; currentW *= (1 + d_p); }
         const totalProfit = Math.max(0, totalPayout - effectivePlanerCapital);
         const profitRatio = totalPayout > 0 ? (totalProfit / totalPayout) : 0;
-
         const taxablePortion = finalPlanerWithdrawalGross * profitRatio;
-        // Keine 30% Teilfreistellung, da generischer Auszahlungsplan
+        
         let tax = taxablePortion * 0.25;
         let kist = hasChurchTax ? taxablePortion * 0.08 : 0;
-        tax += tax * 0.055; // Soli
+        tax += tax * 0.055; 
 
-        planerTax = tax;
-        planerKist = kist;
+        planerTax = tax; planerKist = kist;
         finalPlanerWithdrawalNet = finalPlanerWithdrawalGross - planerTax - planerKist;
     }
 
@@ -814,8 +703,7 @@ export default function App() {
       if (r_m > 0) {
         if (dyn === 0) requiredSavings = requiredCapital * r_m / (Math.pow(1 + r_m, maxYearsToRet * 12) - 1);
         else {
-          const r_a = Math.pow(1 + r_m, 12) - 1; 
-          const C = (Math.pow(1 + r_m, 12) - 1) / r_m; 
+          const r_a = Math.pow(1 + r_m, 12) - 1, C = (Math.pow(1 + r_m, 12) - 1) / r_m; 
           if (Math.abs(r_a - dyn) < 0.00001) requiredSavings = requiredCapital / (C * maxYearsToRet * Math.pow(1 + r_a, maxYearsToRet - 1));
           else requiredSavings = requiredCapital / (C * ((Math.pow(1 + r_a, maxYearsToRet) - Math.pow(1 + dyn, maxYearsToRet)) / (r_a - dyn)));
         }
@@ -827,11 +715,9 @@ export default function App() {
     
     const lumpSumRequired = requiredCapital > 0 ? requiredCapital / Math.pow(1 + (netSolutionReturn/100), maxYearsToRet) : 0;
 
-    // --- INCOME CHART DATA (Bar Chart) ---
     const incomeChartData = [];
     const startYearChart = currentYear; 
     const endYearChart = currentYear + Math.max(50, 105 - Math.floor(currentAgeA)); 
-    
     const etfNets = finalizedContracts.filter(c => c.type === 'etf' && (c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')) === 'rent');
 
     for (let y = startYearChart; y <= endYearChart; y++) {
@@ -841,11 +727,8 @@ export default function App() {
       const target = targetIncomeToday * Math.pow(1 + inflationRate / 100, yearsFromNow);
 
       if (y < baseRetYear) {
-        const netSalary = currentNetIncome * Math.pow(1 + wageGrowthRate / 100, yearsFromNow);
-        incomeChartData.push({
-          age: ageA_in_y, year: y, isRetirement: false,
-          totalNet: netSalary, target, discount, planer: 0
-        });
+        const netSalary = currentFinancials.avgMonthlyNet * Math.pow(1 + wageGrowthRate / 100, yearsFromNow);
+        incomeChartData.push({ age: ageA_in_y, year: y, isRetirement: false, totalNet: netSalary, target, discount, planer: 0 });
       } else {
         const yearsInRet = y - baseRetYear;
         const s1_net_chart = grvNet * Math.pow(1 + grvIncreaseRate / 100, yearsInRet) + (s1_net - grvNet);
@@ -863,10 +746,7 @@ export default function App() {
         }
 
         const totalNet = s1_net_chart + s2_net_chart + s3_net_chart + currentPlanerNet;
-        incomeChartData.push({
-          age: ageA_in_y, year: y, isRetirement: true,
-          totalNet, target, discount, planer: currentPlanerNet
-        });
+        incomeChartData.push({ age: ageA_in_y, year: y, isRetirement: true, totalNet, target, discount, planer: currentPlanerNet });
       }
     }
 
@@ -881,52 +761,49 @@ export default function App() {
       effectivePlanerCapital, finalPlanerWithdrawal: finalPlanerWithdrawalNet, finalPlanerWithdrawalGross, planerTax, planerKist, transferredCapital
     };
   }, [
-    birthDateA, retDateA, grvGrossA, birthDateB, retDateB, grvGrossB,
-    targetIncomeToday, hasChildren, isMarried, kvStatus, pkvPremium, hasChurchTax, currentNetIncome, wageGrowthRate,
+    birthDateA, retDateA, grvGrossA, birthDateB, retDateB, grvGrossB, currentFinancials.avgMonthlyNet,
+    targetIncomeToday, hasChildren, isMarried, kvStatus, pkvPremium, hasChurchTax, wageGrowthRate,
     grvIncreaseRate, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet,
     inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic
   ]);
 
-  // --- TÜV BERECHNUNGSLOGIK (Multi-Contract Profitabilitäts-Check) ---
-  const addTuevItem = (contractId) => {
-      const c = contracts.find(x => x.id === parseInt(contractId));
-      if (!c) return;
-      const currentYear = new Date().getFullYear();
-      const newItem = {
-          id: Date.now(),
-          contractId: c.id,
-          grossMonthly: c.monthlyPremium || c.monthly || 100,
-          subsidyBav: 50,
-          subsidyRiester: 175,
-          startDate: `01.01.${currentYear}`,
-          lifeExpectancy: 85
-      };
-      setTuevItems(prev => [...prev, newItem]);
-  };
-
-  const updateTuevItem = (id, field, value) => {
-      setTuevItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
-  };
-
-  const removeTuevItem = (id) => {
-      setTuevItems(prev => prev.filter(item => item.id !== id));
-  };
-
+  // --- TÜV BERECHNUNGSLOGIK ---
   const tuevData = useMemo(() => {
-     const derivedGrossToday = isMarried ? currentNetIncome / 0.75 : currentNetIncome / 0.65;
-     const zvEToday = derivedGrossToday * 12 * 0.8; 
-     const taxTodayYear = calculateESt(zvEToday, isMarried);
+     // Exaktes errechnetes Monats-Brutto nutzen
+     const estimatedGross = currentFinancials.avgMonthlyGross;
+     const zvEToday = currentFinancials.zvEToday; 
      
-     const marginalTaxNow = (calculateESt(zvEToday + 100, isMarried) - taxTodayYear) / 100;
+     const taxTodayYear = calculateESt(zvEToday, isMarried);
+     let marginalTaxNow = (calculateESt(zvEToday + 100, isMarried) - taxTodayYear) / 100;
+     marginalTaxNow *= (1 + (hasChurchTax ? 0.08 : 0));
      
      const BBG_KV_monthly = 5812.50; 
      const BBG_RV_monthly = 7550.00; 
+     
      let svNow = 0;
-     if (derivedGrossToday < BBG_KV_monthly) svNow = 0.20; 
-     else if (derivedGrossToday < BBG_RV_monthly) svNow = 0.106; 
-     else svNow = 0.0; 
+     let svText = "";
+     
+     if (kvStatus === 'pkv') {
+         if (estimatedGross < BBG_RV_monthly) {
+             svNow = 0.106; 
+             svText = "10,6 % (Nur RV/AV, PKV-versichert)";
+         } else {
+             svNow = 0; svText = "0 % (Gehalt über BBG)";
+         }
+     } else {
+         if (estimatedGross < BBG_KV_monthly) {
+             svNow = 0.211; 
+             svText = "21,1 % (Volle SV-Ersparnis)";
+         } else if (estimatedGross < BBG_RV_monthly) {
+             svNow = 0.106;
+             svText = "10,6 % (Nur RV/AV, über KV-Grenze)";
+         } else {
+             svNow = 0; svText = "0 % (Gehalt über BBG)";
+         }
+     }
 
      const taxRetirement = calculations.marginalTaxRate;
+     const currentYearNum = new Date().getFullYear();
 
      const evaluatedItems = tuevItems.map(item => {
          const selectedC = contracts.find(c => c.id === item.contractId);
@@ -935,52 +812,135 @@ export default function App() {
          if (!selectedC || !calcC) return { ...item, invalid: true };
 
          const cType = selectedC.type;
-         const isKapital = cType.includes('Kapital') || cType === 'etf';
-         const payoutGross = isKapital ? (cType === 'etf' ? calcC.totalCap : Number(selectedC.gross)) : Number(selectedC.gross);
+         const strategy = selectedC.payoutStrategy || (selectedC.includeInNet === false ? 'ignore' : 'rent');
+         const isKapital = cType.includes('Kapital') || (cType === 'etf' && strategy !== 'rent');
+         
+         let payoutGross = 0;
+         if (cType === 'etf') {
+             payoutGross = strategy === 'rent' ? (calcC.grossMonthly || 0) : (calcC.totalCap || 0);
+         } else {
+             payoutGross = Number(selectedC.gross) || 0;
+         }
 
          const cRetDate = selectedC.owner === 'B' && isMarried ? retDateB : retDateA;
+         const cRetYear = parseDateValues(cRetDate)?.y || new Date().getFullYear();
          const cRetAge = selectedC.owner === 'B' && isMarried ? calculations.retirementAgeB : calculations.retirementAgeA;
          
-         const safeStartDate = item.startDate || `01.01.${new Date().getFullYear()}`;
+         const safeStartDate = item.startDate || `01.01.${currentYearNum}`;
          const safeLifeExpectancy = item.lifeExpectancy || 85;
          
          const yearsAcc = Math.max(1, diffInYears(safeStartDate, cRetDate));
          const statutoryYears = Math.max(1, safeLifeExpectancy - cRetAge);
 
+         let activeStatutoryYears = statutoryYears;
+         if (cType === 'etf' && strategy === 'rent') activeStatutoryYears = selectedC.duration || 25;
+
          let agZuschuss = 0;
-         let zulagenMonatlich = 0;
          let steuerErsparnis = 0;
          let svErsparnis = 0;
-         let echterNettoAufwand = 0;
+         let echterNettoAufwand = 0; 
+         let summeNettoEinzahlung = 0;
+         let yearlyNetFlows = [];
 
-         // --- ANSPARPHASE ---
-         if (cType.includes('bav')) {
-             agZuschuss = Math.min(item.grossMonthly, item.subsidyBav || 0);
-             const anBrutto = item.grossMonthly - agZuschuss;
-             steuerErsparnis = anBrutto * marginalTaxNow;
-             svErsparnis = anBrutto * svNow;
-             echterNettoAufwand = Math.max(0, anBrutto - steuerErsparnis - svErsparnis);
-         } else if (cType === 'riester') {
-             zulagenMonatlich = item.subsidyRiester / 12;
-             const maxSteuerVorteil = item.grossMonthly * marginalTaxNow;
-             steuerErsparnis = Math.max(0, maxSteuerVorteil - zulagenMonatlich);
-             const anBrutto = item.grossMonthly - zulagenMonatlich;
-             echterNettoAufwand = Math.max(0, anBrutto - steuerErsparnis);
-         } else if (cType === 'basis') {
-             steuerErsparnis = item.grossMonthly * marginalTaxNow;
-             echterNettoAufwand = Math.max(0, item.grossMonthly - steuerErsparnis);
-         } else {
-             echterNettoAufwand = item.grossMonthly; 
+         let snapshotZulage = 0;
+         let snapshotSteuerErsparnis = 0;
+
+         let dynRate = 1 + (item.dynamic || 0) / 100;
+         let currentGrossMonthly = item.grossMonthly;
+
+         // --- ANSPARPHASE BERECHNUNG ---
+         if (cType === 'riester') {
+             for (let t = 1; t <= yearsAcc; t++) {
+                 let y = currentYearNum + t - 1;
+                 let childSub = 0;
+                 (item.children || []).forEach(ch => {
+                      let age = y - ch.birthYear;
+                      if (age < 25) childSub += (ch.birthYear >= 2008 ? 300 : 185);
+                 });
+                 
+                 let zulageJahr = item.subsidyRiester + childSub;
+                 let maxAbsetzbar = Math.min(currentGrossMonthly * 12 + zulageJahr, 2100);
+                 let steuerErsparnisJahr = Math.max(0, maxAbsetzbar * marginalTaxNow - zulageJahr);
+                 
+                 let netCostJahr = (currentGrossMonthly * 12) - steuerErsparnisJahr;
+                 let valToSave = Math.max(0, netCostJahr);
+                 
+                 summeNettoEinzahlung += valToSave;
+                 yearlyNetFlows.push(valToSave);
+
+                 if (t === 1) { 
+                     snapshotZulage = zulageJahr / 12;
+                     snapshotSteuerErsparnis = steuerErsparnisJahr / 12;
+                     echterNettoAufwand = valToSave / 12;
+                 }
+                 currentGrossMonthly *= dynRate;
+             }
+         } 
+         else if (cType.includes('bav')) {
+             for (let t = 1; t <= yearsAcc; t++) {
+                 let ratio = item.grossMonthly > 0 ? (currentGrossMonthly / item.grossMonthly) : 1;
+                 let currentAgZuschuss = Math.min(currentGrossMonthly, (item.subsidyBav || 0) * ratio);
+                 
+                 let anBrutto = currentGrossMonthly - currentAgZuschuss;
+                 let currSvErsparnis = anBrutto * svNow;
+                 let currSteuerErsparnis = Math.max(0, (anBrutto - currSvErsparnis) * marginalTaxNow);
+                 let currNettoAufwand = Math.max(0, anBrutto - currSteuerErsparnis - currSvErsparnis);
+                 
+                 summeNettoEinzahlung += currNettoAufwand * 12;
+                 yearlyNetFlows.push(currNettoAufwand * 12);
+                 
+                 if (t === 1) {
+                     agZuschuss = currentAgZuschuss;
+                     svErsparnis = currSvErsparnis;
+                     steuerErsparnis = currSteuerErsparnis;
+                     echterNettoAufwand = currNettoAufwand;
+                 }
+                 currentGrossMonthly *= dynRate;
+             }
+         } 
+         else if (cType === 'basis') {
+             for (let t = 1; t <= yearsAcc; t++) {
+                 let currSteuerErsparnis = currentGrossMonthly * marginalTaxNow;
+                 let currNettoAufwand = Math.max(0, currentGrossMonthly - currSteuerErsparnis);
+                 
+                 summeNettoEinzahlung += currNettoAufwand * 12;
+                 yearlyNetFlows.push(currNettoAufwand * 12);
+
+                 if (t === 1) {
+                     steuerErsparnis = currSteuerErsparnis;
+                     echterNettoAufwand = currNettoAufwand;
+                 }
+                 currentGrossMonthly *= dynRate;
+             }
+         } 
+         else {
+             if (cType === 'etf') {
+                 const startCap = selectedC.capital || 0;
+                 const specialPay = (selectedC.specialPaymentYear <= cRetYear) ? (selectedC.specialPayment || 0) : 0;
+                 summeNettoEinzahlung = startCap + specialPay;
+                 for (let t = 1; t <= yearsAcc; t++) {
+                     let flow = currentGrossMonthly * 12;
+                     if (selectedC.specialPayment > 0 && (currentYearNum + t - 1) === selectedC.specialPaymentYear) {
+                         flow += selectedC.specialPayment;
+                     }
+                     summeNettoEinzahlung += currentGrossMonthly * 12;
+                     yearlyNetFlows.push(flow);
+                     
+                     if (t === 1) echterNettoAufwand = currentGrossMonthly;
+                     currentGrossMonthly *= dynRate;
+                 }
+             } else {
+                 for (let t = 1; t <= yearsAcc; t++) {
+                     summeNettoEinzahlung += currentGrossMonthly * 12;
+                     yearlyNetFlows.push(currentGrossMonthly * 12);
+                     
+                     if (t === 1) echterNettoAufwand = currentGrossMonthly;
+                     currentGrossMonthly *= dynRate;
+                 }
+             }
          }
 
-         const summeNettoEinzahlung = echterNettoAufwand * 12 * yearsAcc;
-
-         // --- AUSZAHLUNGSPHASE (100% SYNC MIT HAUPT-ENGINE) ---
-         let kvPvAbzug = 0;
-         let steuerAbzug = 0;
-         let echteNettoRente = 0;
-         let echteNettoKapital = 0;
-         let summeNettoAuszahlung = 0;
+         let kvPvAbzug = 0, steuerAbzug = 0, echteNettoRente = 0, echteNettoKapital = 0, summeNettoAuszahlung = 0;
 
          if (isKapital) {
              echteNettoKapital = calcC.netCapital || 0;
@@ -991,76 +951,115 @@ export default function App() {
              kvPvAbzug = calcC.kvpv_deduction || 0;
              steuerAbzug = (calcC.tax || 0) + (calcC.kist || 0);
              echteNettoRente = calcC.net || 0;
-             summeNettoAuszahlung = echteNettoRente * 12 * statutoryYears;
+             summeNettoAuszahlung = echteNettoRente * 12 * activeStatutoryYears;
          }
 
-         const amortisationsJahre = summeNettoEinzahlung > 0 && summeNettoAuszahlung > 0 
-              ? (isKapital ? 0 : (summeNettoEinzahlung / (echteNettoRente * 12))) 
-              : 0;
+         const amortisationsJahre = summeNettoEinzahlung > 0 && summeNettoAuszahlung > 0 ? (isKapital ? 0 : (summeNettoEinzahlung / (echteNettoRente * 12))) : 0;
          const nettoHebel = summeNettoEinzahlung > 0 ? (summeNettoAuszahlung / summeNettoEinzahlung) : 0;
          const echterNettoGewinn = summeNettoAuszahlung - summeNettoEinzahlung;
 
          let irr = 0;
          if (summeNettoEinzahlung > 0 && summeNettoAuszahlung > 0 && payoutGross > 0) {
-             let minRate = -0.1;
-             let maxRate = 0.2;
+             let minRate = -0.1, maxRate = 0.2;
              for (let i = 0; i < 40; i++) {
                  irr = (minRate + maxRate) / 2;
                  let npv = 0;
-                 for (let t = 1; t <= yearsAcc; t++) {
-                     npv -= (echterNettoAufwand * 12) / Math.pow(1 + irr, t);
-                 }
-                 if (isKapital) {
-                     npv += summeNettoAuszahlung / Math.pow(1 + irr, yearsAcc);
-                 } else {
-                     for (let t = yearsAcc + 1; t <= yearsAcc + statutoryYears; t++) {
-                         npv += (echteNettoRente * 12) / Math.pow(1 + irr, t);
-                     }
-                 }
-                 if (npv > 0) minRate = irr;
-                 else maxRate = irr;
+                 if (cType === 'etf') npv -= (selectedC.capital || 0);
+
+                 for (let t = 1; t <= yearsAcc; t++) if (t - 1 < yearlyNetFlows.length) npv -= yearlyNetFlows[t-1] / Math.pow(1 + irr, t);
+                 
+                 if (isKapital) npv += summeNettoAuszahlung / Math.pow(1 + irr, yearsAcc);
+                 else for (let t = yearsAcc + 1; t <= yearsAcc + activeStatutoryYears; t++) npv += (echteNettoRente * 12) / Math.pow(1 + irr, t);
+                 
+                 if (npv > 0) minRate = irr; else maxRate = irr;
              }
          }
 
          return {
              ...item, cType, payoutGross, isKapital, name: selectedC.name, layer: selectedC.layer,
-             yearsAcc, statutoryYears, safeStartDate, safeLifeExpectancy,
-             agZuschuss, zulagenMonatlich, steuerErsparnis, svErsparnis, echterNettoAufwand, summeNettoEinzahlung,
+             yearsAcc, statutoryYears: activeStatutoryYears, safeStartDate, safeLifeExpectancy,
+             agZuschuss, snapshotZulage, snapshotSteuerErsparnis, steuerErsparnis, svErsparnis, echterNettoAufwand, summeNettoEinzahlung,
              kvPvAbzug, steuerAbzug, echteNettoRente, echteNettoKapital, summeNettoAuszahlung,
              amortisationsJahre, nettoHebel, irr: irr * 100, echterNettoGewinn
          };
      });
 
-     return { marginalTaxNow, svNow, taxRetirement, derivedGrossToday, items: evaluatedItems };
-  }, [tuevItems, contracts, currentNetIncome, isMarried, calculations, kvStatus, hasChildren]);
+     return { marginalTaxNow, svNow, taxRetirement, estimatedGross, svText, items: evaluatedItems };
+  }, [tuevItems, contracts, currentFinancials, isMarried, calculations, kvStatus, hasChildren, hasChurchTax]);
 
   // SVG Helper
-  const formatCurrency = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val);
+  const formatCurrency = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(val);
   const formatResultCurrency = (val) => formatCurrency(showRealValue ? val / calculations.inflationFactor : val);
   const formatChartCurrency = (val, discount) => formatCurrency(showRealValue ? val / discount : val);
   const formatYAxis = (val) => val >= 1000000 ? (val / 1000000).toFixed(1).replace('.0', '') + ' Mio.' : val >= 1000 ? (val / 1000).toFixed(0) + 'k' : val.toString();
   const renderBonVal = (val) => (<><span className="print:hidden">{formatResultCurrency(val)}</span><span className="hidden print:inline">{formatCurrency(val)} <span className="text-slate-500 font-normal">({formatCurrency(val / calculations.inflationFactor)} real)</span></span></>);
 
-  // --- CHART VIEW LOGIC (Sliding Window) ---
-  const chartWindowSize = 30; // 30 Jahre gleichzeitig sichtbar
+  // Render Helper für das synchronisierte Gehalts-Input-Feld
+  const renderSalaryInput = (context = 'top') => {
+      const isTuev = context === 'tuev';
+      return (
+          <div className={isTuev ? "bg-white p-4 rounded-xl shadow-sm border border-slate-200" : "mb-5"}>
+              <h3 className={`font-bold mb-3 ${isTuev ? 'text-sm text-slate-700 border-b border-slate-200 pb-2 flex items-center gap-2' : 'text-xs text-slate-600'}`}>
+                  {isTuev && <Wallet className="w-4 h-4 text-slate-400"/>} 
+                  {isTuev ? 'Ihr Haushaltseinkommen (Heute)' : 'Heutiges Gehalt (Haushalt)'}
+              </h3>
+              
+              <div className={`flex ${isTuev ? 'flex-col sm:flex-row gap-3 items-end' : 'gap-2 mb-1.5'}`}>
+                  <div className={isTuev ? 'w-full sm:w-1/3' : 'w-1/3'}>
+                      {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Gehalts-Art</label>}
+                      <select value={salaryInputMode} onChange={e => setSalaryInputMode(e.target.value)} className={`w-full border rounded-lg p-2.5 text-sm font-bold outline-none shadow-sm ${isTuev ? 'border-amber-200 bg-amber-50 text-amber-900 focus:border-amber-400' : 'border-indigo-200 bg-white text-slate-700 focus:border-indigo-400'}`}>
+                          <option value="brutto">Brutto</option>
+                          <option value="netto">Netto</option>
+                      </select>
+                  </div>
+                  <div className={isTuev ? 'w-full sm:w-1/3' : 'w-full'}>
+                      {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Betrag</label>}
+                      <input type="number" value={salaryInputValue} onChange={e => setSalaryInputValue(parseNum(e.target.value))} placeholder="Mtl. Betrag" className={`w-full border rounded-lg p-2.5 text-sm font-bold shadow-sm outline-none ${isTuev ? 'border-amber-200 bg-white focus:border-amber-400' : 'border-indigo-200 bg-white focus:border-indigo-400'}`} />
+                  </div>
+                  <div className={isTuev ? 'w-full sm:w-1/3' : 'w-2/3'}>
+                      {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Auszahlungen / Jahr</label>}
+                      <select value={salaryMultiplier} onChange={e => setSalaryMultiplier(Number(e.target.value))} className={`w-full border rounded-lg p-2.5 text-sm font-bold outline-none shadow-sm ${isTuev ? 'border-amber-200 bg-white text-slate-700 focus:border-amber-400' : 'border-indigo-200 bg-white text-slate-700 focus:border-indigo-400'}`}>
+                          <option value={12}>12 Gehälter</option>
+                          <option value={12.5}>12.5 (halbes 13.)</option>
+                          <option value={13}>13 (+ Urlaubsgeld)</option>
+                          <option value={14}>14 (+ Urlaub/Weihn.)</option>
+                      </select>
+                  </div>
+              </div>
+              
+              <div className={`flex justify-between items-center bg-slate-50 border border-slate-200 rounded-lg p-2 mt-3 ${isTuev ? 'shadow-sm' : ''}`}>
+                  {!isTuev ? (
+                      <>
+                          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Errechnetes Netto:</span>
+                          <span className="text-sm font-black text-indigo-600">{formatCurrency(currentFinancials.avgMonthlyNet)} / M</span>
+                      </>
+                  ) : (
+                      <>
+                          <div className="flex flex-col"><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Basis Ø Brutto</span><span className="font-bold text-slate-700">{formatCurrency(currentFinancials.avgMonthlyGross)}</span></div>
+                          <div className="flex flex-col text-right"><span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">Basis Ø Netto</span><span className="font-bold text-indigo-600">{formatCurrency(currentFinancials.avgMonthlyNet)}</span></div>
+                      </>
+                  )}
+              </div>
+          </div>
+      );
+  };
+
+  const chartWindowSize = 30; 
   const defaultStartAge = Math.max(Math.floor(calculations.currentAgeA), Math.floor(calculations.retirementAgeA) - 3);
   const activeStartAge = manualChartStart !== null ? manualChartStart : defaultStartAge;
   const visibleChartData = calculations.incomeChartData.filter(d => d.age >= activeStartAge && d.age <= activeStartAge + chartWindowSize);
 
   const svgWidth = 800, svgHeight = 300, paddingX = 55, paddingY = 20, bottomPadding = 30, graphHeight = svgHeight - paddingY - bottomPadding;
-  
   const maxDataVal = visibleChartData.length > 0 ? Math.max(...visibleChartData.map(d => {
     const val = showRealValue ? (d.totalNet / (d.discount || 1)) : d.totalNet;
     const tgt = showRealValue ? (d.target / (d.discount || 1)) : d.target;
     return Math.max(isNaN(val) ? 0 : val, isNaN(tgt) ? 0 : tgt);
   })) : 0;
-  
   const maxY = Math.max(1000, (isNaN(maxDataVal) ? 1000 : maxDataVal) * 1.15); 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map(mult => maxY * mult); 
   const stepX = (svgWidth - paddingX * 2) / Math.max(1, visibleChartData.length);
   const barWidth = stepX * 0.7;
   const getY = (val) => svgHeight - bottomPadding - (val / maxY) * graphHeight;
-  
   const targetPath = visibleChartData.map((d, i) => {
     const cx = paddingX + i * stepX + stepX / 2;
     const tgt = showRealValue ? (d.target / (d.discount || 1)) : d.target;
@@ -1068,25 +1067,17 @@ export default function App() {
   }).join(" ");
 
   const renderContractInput = (c) => {
-    // BUGFIX: Wir holen uns hier das frisch berechnete Vertrags-Objekt aus der Steuer-Engine (inkl. compareResult)
     const calcC = calculations.contracts.find(x => x.id === c.id) || c;
-    const isExpanded = c.isExpanded !== false; // Standardmäßig ausgeklappt
+    const isExpanded = c.isExpanded !== false;
     
     const typeLabels = {
-      'basis': 'Rürup / Basisrente',
-      'bav': 'bAV (Rente)',
-      'bavKapital': 'bAV (Kapital)',
-      'riester': 'Riester-Rente',
-      'prvRente': 'Private Rente (monatlich)',
-      'prvKapital': 'Private Rente (Kapitalauszahlung)',
-      'immobilie': 'Vermietung (Immobilie)',
-      'etf': 'Freies Depot (ETF / Aktien)'
+      'basis': 'Rürup / Basisrente', 'bav': 'bAV (Rente)', 'bavKapital': 'bAV (Kapital)', 'riester': 'Riester-Rente',
+      'prvRente': 'Private Rente (monatlich)', 'prvKapital': 'Private Rente (Kapitalauszahlung)',
+      'immobilie': 'Vermietung (Immobilie)', 'etf': 'Freies Depot (ETF / Aktien)'
     };
 
     return (
     <div key={c.id} className="bg-white border border-slate-200 rounded-lg shadow-sm mb-3 print:border-slate-300 print:shadow-none overflow-hidden">
-      
-      {/* COLLAPSIBLE HEADER (Hidden in Print) */}
       <div 
         className={`flex justify-between items-center p-3 cursor-pointer hover:bg-slate-50 transition-colors print:hidden ${isExpanded ? 'border-b border-slate-100 bg-slate-50/50' : ''}`}
         onClick={() => updateContract(c.id, 'isExpanded', !isExpanded)}
@@ -1107,7 +1098,6 @@ export default function App() {
         </button>
       </div>
 
-      {/* BODY (Always visible in Print) */}
       <div className={`${isExpanded ? 'block' : 'hidden'} print:block p-4 relative`}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
           <div>
@@ -1148,14 +1138,8 @@ export default function App() {
               <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Sparrate (€/M)</label><input type="number" value={c.monthly ?? ''} onChange={e => updateContract(c.id, 'monthly', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs font-semibold" /></div>
             </div>
             <div className="bg-blue-50/50 rounded-lg border border-blue-100 overflow-hidden print:bg-white print:border-slate-200">
-               <button 
-                   onClick={() => updateContract(c.id, 'showSpecialPayment', !c.showSpecialPayment)}
-                   className="w-full p-2 flex justify-between items-center hover:bg-blue-100/50 transition-colors"
-               >
-                   <div className="text-[10px] font-bold text-blue-800 flex items-center gap-1.5">
-                       <Zap className="w-3 h-3"/> Geplante Sonderzahlung
-                       {c.specialPayment > 0 && !c.showSpecialPayment && <span className="bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded text-[8px] uppercase tracking-wider ml-1">Aktiv ({formatCurrency(c.specialPayment)})</span>}
-                   </div>
+               <button onClick={() => updateContract(c.id, 'showSpecialPayment', !c.showSpecialPayment)} className="w-full p-2 flex justify-between items-center hover:bg-blue-100/50 transition-colors">
+                   <div className="text-[10px] font-bold text-blue-800 flex items-center gap-1.5"><Zap className="w-3 h-3"/> Geplante Sonderzahlung {c.specialPayment > 0 && !c.showSpecialPayment && <span className="bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded text-[8px] uppercase tracking-wider ml-1">Aktiv ({formatCurrency(c.specialPayment)})</span>}</div>
                    {c.showSpecialPayment ? <ChevronUp className="w-3.5 h-3.5 text-blue-500" /> : <ChevronDown className="w-3.5 h-3.5 text-blue-500" />}
                </button>
                {c.showSpecialPayment && (
@@ -1169,15 +1153,11 @@ export default function App() {
               <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Ansp.</label><input type="number" step="0.1" value={c.returnAcc ?? 6} onChange={e => updateContract(c.id, 'returnAcc', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
               <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">Rend. Entn.</label><input type="number" step="0.1" value={c.returnWith ?? 2} onChange={e => updateContract(c.id, 'returnWith', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
               <div><label className="block text-[10px] font-semibold text-slate-500 mb-1">TER (%)</label><input type="number" step="0.1" value={c.ter ?? 0.2} onChange={e => updateContract(c.id, 'ter', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 text-xs" /></div>
-              <div><label className="block text-[10px] font-bold text-indigo-600 mb-1">Dauer Entn. (J)</label><input type="number" step="1" value={c.duration ?? 25} onChange={e => updateContract(c.id, 'duration', parseNum(e.target.value))} className="w-full border-2 border-indigo-300 rounded p-1.5 text-xs font-bold" /></div>
+              <div><label className="block text-[10px] font-bold text-indigo-600 mb-1">Dauer Entn.</label><input type="number" step="1" value={c.duration ?? 25} onChange={e => updateContract(c.id, 'duration', parseNum(e.target.value))} className="w-full border-2 border-indigo-300 rounded p-1.5 text-xs font-bold" /></div>
             </div>
             <div className="mt-3 pt-3 border-t border-slate-100">
               <label className="block text-[10px] font-semibold text-slate-500 mb-2 uppercase">Auszahlungs-Strategie</label>
-              <select
-                 value={c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')}
-                 onChange={e => updateContract(c.id, 'payoutStrategy', e.target.value)}
-                 className="w-full border border-slate-200 rounded p-1.5 text-xs bg-white font-medium text-slate-700"
-              >
+              <select value={c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')} onChange={e => updateContract(c.id, 'payoutStrategy', e.target.value)} className="w-full border border-slate-200 rounded p-1.5 text-xs bg-white font-medium text-slate-700">
                  <option value="rent">Mtl. Entnahme (ins Gesamt-Netto)</option>
                  <option value="planer">Kapital komplett in den Planer übertragen</option>
                  <option value="ignore">Ignorieren (Nur Kapitalwert anzeigen)</option>
@@ -1197,11 +1177,7 @@ export default function App() {
             )}
             <div className="mt-1">
               <label className="block text-[10px] font-semibold text-slate-500 mb-2 uppercase">Auszahlungs-Strategie</label>
-              <select
-                 value={c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')}
-                 onChange={e => updateContract(c.id, 'payoutStrategy', e.target.value)}
-                 className="w-full border border-slate-200 rounded p-1.5 text-xs bg-white font-medium text-slate-700"
-              >
+              <select value={c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')} onChange={e => updateContract(c.id, 'payoutStrategy', e.target.value)} className="w-full border border-slate-200 rounded p-1.5 text-xs bg-white font-medium text-slate-700">
                  <option value="rent">In mtl. Rente umwandeln (ins Netto)</option>
                  <option value="planer">Netto-Kapital in den Planer übertragen</option>
                  <option value="ignore">Ignorieren (Nur Netto-Kapital anzeigen)</option>
@@ -1209,24 +1185,16 @@ export default function App() {
             </div>
           </div>
         )}
-        
-        {c.type === 'immobilie' && <div className="flex items-center gap-2 pt-3 border-t"><input type="checkbox" checked={c.includeInNet !== false} onChange={e => updateContract(c.id, 'includeInNet', e.target.checked)} className="rounded text-emerald-600 w-3 h-3" /><label className="text-[10px] text-slate-600 font-medium">In Gesamt-Netto übernehmen</label></div>}
 
-        {/* WAHLRECHT SIMULATOR & ALTVERTRÄGE */}
         {(c.type === 'bav' || c.type === 'bavKapital' || c.type === 'prvRente' || c.type === 'prvKapital') && (
           <div className="mt-4 pt-3 border-t border-slate-100">
              <div className="flex items-center gap-2 mb-2">
                 <input type="checkbox" checked={!!c.isOldContract} onChange={e => updateContract(c.id, 'isOldContract', e.target.checked)} className="rounded text-indigo-600 w-3 h-3 cursor-pointer" id={`old-${c.id}`} />
-                <label htmlFor={`old-${c.id}`} className="text-[10px] text-slate-600 font-medium cursor-pointer">
-                   Vertrag vor 2005 abgeschlossen (Steuerprivileg für Altverträge)
-                </label>
+                <label htmlFor={`old-${c.id}`} className="text-[10px] text-slate-600 font-medium cursor-pointer">Vertrag vor 2005 abgeschlossen (Steuerprivileg)</label>
              </div>
-             
              <div className="flex items-center gap-2 mb-3">
                 <input type="checkbox" checked={!!c.compareMode} onChange={e => updateContract(c.id, 'compareMode', e.target.checked)} className="rounded text-emerald-600 w-3 h-3 cursor-pointer" id={`comp-${c.id}`} />
-                <label htmlFor={`comp-${c.id}`} className="text-[10px] text-slate-700 font-bold cursor-pointer">
-                   Wahlrecht simulieren (Vergleich: Rente vs. Kapital)
-                </label>
+                <label htmlFor={`comp-${c.id}`} className="text-[10px] text-slate-700 font-bold cursor-pointer">Wahlrecht simulieren (Vergleich: Rente vs. Kapital)</label>
              </div>
 
              {c.compareMode && (
@@ -1234,43 +1202,23 @@ export default function App() {
                    <div className="grid grid-cols-2 gap-4 mb-4">
                       <div>
                         <label className="block text-xs text-slate-500 uppercase font-bold mb-1.5">Brutto-Rente mtl. (€)</label>
-                        <input type="number" value={c.compareRenteGross ?? ''} onChange={e => updateContract(c.id, 'compareRenteGross', parseNum(e.target.value))} className="w-full border border-slate-300 bg-white rounded-lg p-2.5 text-sm font-semibold" placeholder="z.B. 300" />
+                        <input type="number" value={c.compareRenteGross ?? ''} onChange={e => updateContract(c.id, 'compareRenteGross', parseNum(e.target.value))} className="w-full border border-slate-300 bg-white rounded-lg p-2.5 text-sm font-semibold" />
                       </div>
                       <div>
                         <label className="block text-xs text-slate-500 uppercase font-bold mb-1.5">Brutto-Kapital (€)</label>
-                        <input type="number" value={c.compareCapitalGross ?? ''} onChange={e => updateContract(c.id, 'compareCapitalGross', parseNum(e.target.value))} className="w-full border border-slate-300 bg-white rounded-lg p-2.5 text-sm font-semibold" placeholder="z.B. 100000" />
+                        <input type="number" value={c.compareCapitalGross ?? ''} onChange={e => updateContract(c.id, 'compareCapitalGross', parseNum(e.target.value))} className="w-full border border-slate-300 bg-white rounded-lg p-2.5 text-sm font-semibold" />
                       </div>
                    </div>
 
                    {calcC.compareResult && (
                       <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-sm mt-2">
                          <div className="grid grid-cols-2 gap-4 pb-4 mb-4 border-b border-slate-100">
-                            <div>
-                              <div className="text-xs text-slate-500 font-bold uppercase mb-1">Erwartetes Netto-Kapital</div>
-                              <div className="font-black text-lg text-emerald-600">{formatCurrency(calcC.compareResult.netCapital)}</div>
-                            </div>
-                            <div>
-                              <div className="text-xs text-slate-500 font-bold uppercase mb-1">Erwartete Netto-Rente</div>
-                              <div className="font-black text-lg text-indigo-600">{formatCurrency(calcC.compareResult.netRente)} / M</div>
-                            </div>
+                            <div><div className="text-xs text-slate-500 font-bold uppercase mb-1">Netto-Kapital</div><div className="font-black text-lg text-emerald-600">{formatCurrency(calcC.compareResult.netCapital)}</div></div>
+                            <div><div className="text-xs text-slate-500 font-bold uppercase mb-1">Netto-Rente</div><div className="font-black text-lg text-indigo-600">{formatCurrency(calcC.compareResult.netRente)} / M</div></div>
                          </div>
-                         
                          <div className="space-y-3">
-                            <div className="bg-slate-50 p-3.5 rounded-xl flex gap-3 items-start">
-                               <Calculator className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
-                               <div className="text-xs text-slate-700 leading-relaxed">
-                                  <span className="font-bold text-slate-900">1. Break-Even (0 % Zins):</span> Sie müssen ein Alter von <strong className="text-rose-600">{calcC.compareResult.breakEvenAge0.toFixed(1)} Jahren</strong> erreichen (noch {calcC.compareResult.amortYears0.toFixed(1)} Jahre ab Rente), damit die Summe der Netto-Renten das Netto-Kapital übersteigt.
-                               </div>
-                            </div>
-                            <div className="bg-indigo-50/50 p-3.5 rounded-xl flex gap-3 items-start border border-indigo-50">
-                               <TrendingUp className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" />
-                               <div className="text-xs text-indigo-900 leading-relaxed">
-                                  <span className="font-bold">2. Break-Even (2 % Anlage-Rendite):</span> 
-                                  {calcC.compareResult.isPerpetual 
-                                     ? " Das Kapital reicht ewig! Die 2 % Zinsen aus dem Kapital werfen bereits mehr Ertrag ab als die monatliche Rente. Die Rente rechnet sich finanziell nie." 
-                                     : <> Sie müssen ein Alter von <strong className="text-rose-600">{calcC.compareResult.breakEvenAge2.toFixed(1)} Jahren</strong> erreichen (noch {calcC.compareResult.amortYears2.toFixed(1)} Jahre ab Rente), um das verzinsliche Kapital zu übertreffen.</>}
-                               </div>
-                            </div>
+                            <div className="bg-slate-50 p-3.5 rounded-xl flex gap-3 items-start"><Calculator className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" /><div className="text-xs text-slate-700 leading-relaxed"><span className="font-bold text-slate-900">1. Break-Even (0 % Zins):</span> Sie müssen <strong className="text-rose-600">{calcC.compareResult.breakEvenAge0.toFixed(1)} Jahre</strong> alt werden, damit Rente &gt; Kapital.</div></div>
+                            <div className="bg-indigo-50/50 p-3.5 rounded-xl flex gap-3 items-start border border-indigo-50"><TrendingUp className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" /><div className="text-xs text-indigo-900 leading-relaxed"><span className="font-bold">2. Break-Even (2 % Anlage-Rendite):</span> {calcC.compareResult.isPerpetual ? " Das Kapital reicht ewig! Die Rente rechnet sich finanziell nie." : <> Sie müssen <strong className="text-rose-600">{calcC.compareResult.breakEvenAge2.toFixed(1)} Jahre</strong> alt werden.</>}</div></div>
                          </div>
                       </div>
                    )}
@@ -1283,47 +1231,35 @@ export default function App() {
     );
   };
 
-  // --- KASSENBON RENDER FUNKTION ---
   const renderBonContract = (c) => {
     const strategy = c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent');
     const isKapital = c.type === 'etf' || c.type.includes('Kapital');
-    
-    // Sicherheit gegen leere Eingaben (damit kein NaN entsteht)
     const bruttoKapital = Number(c.type === 'etf' ? c.totalCap : c.gross) || 0;
     const nettoKapital = Number(c.netCapital) || 0;
     const safeBrutto = isNaN(bruttoKapital) ? 0 : bruttoKapital;
     const safeNetto = isNaN(nettoKapital) ? 0 : nettoKapital;
 
-    // Den genauen gewünschten Wortlaut aus den Screenshots nachbauen
     let subtitle = '';
     if (isKapital) {
-       if (strategy === 'rent') {
-           subtitle = `Brutto: ${formatResultCurrency(safeBrutto)} (Netto: ${formatResultCurrency(safeNetto)}) | Mtl. Entnahme`;
-       } else {
-           subtitle = `Kapital: ${formatResultCurrency(safeBrutto)} | ${strategy === 'planer' ? 'In Planer übertragen' : 'Ignoriert'}`;
-       }
+       if (strategy === 'rent') subtitle = `Brutto: ${formatResultCurrency(safeBrutto)} (Netto: ${formatResultCurrency(safeNetto)}) | Mtl. Entnahme`;
+       else subtitle = `Kapital: ${formatResultCurrency(safeBrutto)} | ${strategy === 'planer' ? 'In Planer übertragen' : 'Ignoriert'}`;
     } else {
        const ertragsanteilText = (c.type === 'prvRente' || (c.type === 'bav' && c.isOldContract)) ? ` | Steuerpflichtig: ${Math.round((c.owner === 'B' && isMarried ? calculations.ertragsanteilRateB : calculations.ertragsanteilRateA) * 100)} %` : '';
        subtitle = `Brutto: ${formatResultCurrency(Number(c.gross) || 0)}${ertragsanteilText}`;
     }
-    
     const altvertragBadge = c.isOldContract ? <span className="text-[8px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-2 uppercase font-bold tracking-wider">Altvertrag</span> : null;
 
     return (
       <div key={c.id} className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
         <div className="flex justify-between items-center mb-1">
           <div className="font-semibold text-sm text-blue-900">{c.name} {isMarried ? `(${c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})` : ''} {altvertragBadge}</div>
-          <div className={`font-bold text-base ${strategy !== 'rent' ? 'text-slate-400' : 'text-slate-800'}`}>
-            {strategy !== 'rent' ? '0 €' : renderBonVal(c.net || 0)}
-          </div>
+          <div className={`font-bold text-base ${strategy !== 'rent' ? 'text-slate-400' : 'text-slate-800'}`}>{strategy !== 'rent' ? '0 €' : renderBonVal(c.net || 0)}</div>
         </div>
         <div className="flex justify-between items-end text-[10px] text-slate-500">
           <div>{subtitle}</div>
           {(c.kvpv_deduction > 0 || (c.tax || 0) > 0 || (c.kist || 0) > 0) && (
             <div className="text-rose-500 text-right leading-tight">
-              {c.kvpv_deduction > 0 ? `KV/PV: ${formatResultCurrency(c.kvpv_deduction)} | ` : ''}
-              {c.type === 'etf' ? 'Abgeltung: ' : 'ESt: '}
-              {formatResultCurrency((c.tax || 0) + (c.kist || 0))}
+              {c.kvpv_deduction > 0 ? `KV/PV: ${formatResultCurrency(c.kvpv_deduction)} | ` : ''}{c.type === 'etf' ? 'Abgeltung: ' : 'ESt: '}{formatResultCurrency((c.tax || 0) + (c.kist || 0))}
             </div>
           )}
         </div>
@@ -1333,31 +1269,18 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-28 print:bg-slate-50 print:pb-0" style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
-      {/* HIER IST DER MAGISCHE BEFEHL: style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }} erzwingt den Druck in Web-Optik! */}
       
-      {/* HEADER */}
       <header className={`sticky top-0 z-50 bg-slate-900 text-white shadow-md print:hidden transition-all duration-300 ease-in-out ${isHeaderCollapsed ? 'py-2' : 'p-3 sm:p-4'}`}>
         <div className="max-w-6xl mx-auto relative flex items-center justify-center min-h-[40px]">
           
-          {/* TOGGLE BUTTON */}
-          <button 
-            onClick={() => setIsHeaderCollapsed(!isHeaderCollapsed)}
-            className="absolute right-0 p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-full transition-colors focus:outline-none z-10 shadow-sm border border-slate-700 mr-2 sm:mr-4"
-            title={isHeaderCollapsed ? "Menü ausklappen" : "Menü einklappen"}
-          >
+          <button onClick={() => setIsHeaderCollapsed(!isHeaderCollapsed)} className="absolute right-0 p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-full transition-colors focus:outline-none z-10 shadow-sm border border-slate-700 mr-2 sm:mr-4" title={isHeaderCollapsed ? "Menü ausklappen" : "Menü einklappen"}>
             {isHeaderCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
           </button>
 
-          {/* HEADER INHALT */}
           <div className={`w-full flex transition-all duration-300 ${isHeaderCollapsed ? 'justify-center' : 'flex-col lg:flex-row items-center gap-4 pr-10 lg:pr-0'}`}>
             
             {isHeaderCollapsed ? (
-              /* EINGEKLAPPTER ZUSTAND: Nur kleines Logo */
-              <div 
-                className="flex items-center justify-center cursor-pointer group" 
-                onClick={() => setIsHeaderCollapsed(false)} 
-                title="Klicken zum Ausklappen"
-              >
+              <div className="flex items-center justify-center cursor-pointer group" onClick={() => setIsHeaderCollapsed(false)} title="Klicken zum Ausklappen">
                 <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 transform group-hover:scale-110 transition-transform duration-200">
                   <rect x="15" y="60" width="16" height="25" rx="4" fill="#94A3B8" />
                   <rect x="42" y="40" width="16" height="45" rx="4" fill="#64748B" />
@@ -1367,9 +1290,7 @@ export default function App() {
                 </svg>
               </div>
             ) : (
-              /* AUSGEKLAPPTER ZUSTAND: Voller Header */
               <>
-                {/* Logo & Titel (LINKS - Mittig in der linken Hälfte) */}
                 <div className="flex items-center justify-center gap-4 sm:gap-6 w-full lg:w-1/2 shrink-0">
                   <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-14 h-14 sm:w-20 sm:h-20 shrink-0">
                     <rect x="15" y="60" width="16" height="25" rx="4" fill="#94A3B8" />
@@ -1384,53 +1305,36 @@ export default function App() {
                   </div>
                 </div>
                 
-                {/* Controls (RECHTS - Zweizeilig) */}
                 <div className="flex flex-col gap-2 items-center lg:items-end w-full lg:w-1/2">
-                  
-                  {/* Obere Reihe: Einstellungen */}
                   <div className="flex bg-slate-800 p-1.5 rounded-lg border border-slate-700 gap-1.5 flex-wrap justify-center lg:justify-end">
                     <button onClick={() => setShowRealValue(!showRealValue)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${showRealValue ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Coins className="w-3 h-3" /> Kaufkraft heute</button>
                     <div className="w-px bg-slate-700 mx-1"></div>
-                    
                     <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white shadow">
                       <span>Infl.:</span><select value={inflationRate} onChange={e => setInflationRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer"><option value={0}>0 %</option><option value={1.5}>1,5 %</option><option value={2.0}>2,0 %</option><option value={2.5}>2,5 %</option></select>
                     </div>
                     <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 text-white shadow">
                       <span>Index.:</span>
                       <select value={taxIndexRate} onChange={e => setTaxIndexRate(Number(e.target.value))} className="bg-transparent font-bold outline-none cursor-pointer">
-                        <option value={0}>0 %</option>
-                        <option value={1.0}>1,0 %</option>
-                        <option value={1.5}>1,5 %</option>
-                        <option value={2.0}>2,0 %</option>
+                        <option value={0}>0 %</option><option value={1.0}>1,0 %</option><option value={1.5}>1,5 %</option><option value={2.0}>2,0 %</option>
                         {taxIndexRate !== '' && ![0, 1.0, 1.5, 2.0].includes(taxIndexRate) && <option value={taxIndexRate}>{taxIndexRate} %</option>}
                       </select>
                     </div>
                     <div className="w-px bg-slate-700 mx-1"></div>
-
                     <button onClick={() => setIsMarried(false)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${!isMarried ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}><User className="w-3 h-3" /> Single</button>
                     <button onClick={() => setIsMarried(true)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${isMarried ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}><Users className="w-3 h-3" /> Verheiratet</button>
                   </div>
 
-                  {/* Untere Reihe: Aktionen & Export */}
                   <div className="flex bg-slate-800 p-1.5 rounded-lg border border-slate-700 gap-1.5 flex-wrap justify-center lg:justify-end">
                     <input type="file" accept=".json" ref={fileInputRef} onChange={handleImport} className="hidden" />
                     <button onClick={() => fileInputRef.current.click()} title="Profil laden" className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"><FolderOpen className="w-3.5 h-3.5" /> Laden</button>
                     <button onClick={handleExport} title="Profil speichern" className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"><Save className="w-3.5 h-3.5" /> Speichern</button>
-                    
                     <div className="w-px bg-slate-700 mx-1"></div>
-
                     <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium bg-slate-800 border border-slate-700 text-white">
                       <span className="text-slate-400 hidden sm:inline">PDF-Text:</span>
-                      <select value={printExplanationMode} onChange={e => setPrintExplanationMode(e.target.value)} className="bg-transparent font-bold outline-none cursor-pointer">
-                        <option value="none" className="text-slate-800">Ohne</option>
-                        <option value="short" className="text-slate-800">Kurz</option>
-                        <option value="long" className="text-slate-800">Ausführlich</option>
-                      </select>
+                      <select value={printExplanationMode} onChange={e => setPrintExplanationMode(e.target.value)} className="bg-transparent font-bold outline-none cursor-pointer"><option value="none" className="text-slate-800">Ohne</option><option value="short" className="text-slate-800">Kurz</option><option value="long" className="text-slate-800">Ausführlich</option></select>
                     </div>
-                    
                     <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-rose-600 text-white hover:bg-rose-500 shadow-sm ml-1 transition-colors"><Download className="w-3 h-3" /> PDF Export</button>
                   </div>
-
                 </div>
               </>
             )}
@@ -1438,7 +1342,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* NEUER PREMIUM PRINT HEADER */}
+      {/* PREMIUM PRINT HEADER */}
       <div className="hidden print:flex max-w-6xl mx-auto p-8 border-b-4 border-emerald-500 mb-8 items-center justify-between bg-white shadow-sm rounded-t-2xl mt-4">
         <div className="flex items-center gap-6">
           <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-24 h-24 shrink-0">
@@ -1448,28 +1352,22 @@ export default function App() {
             <path d="M10 50 L40 30 L60 40 L85 10" stroke="#10B981" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
             <circle cx="85" cy="10" r="8" fill="#10B981" />
           </svg>
-          <div className="text-left">
-            <h2 className="text-4xl font-extrabold tracking-tight text-slate-900 mb-1">JS-Rentenplaner </h2>
-            <p className="text-slate-500 text-xl font-medium">Ihre Zukunft. Heute smart geplant.</p>
-          </div>
+          <div className="text-left"><h2 className="text-4xl font-extrabold tracking-tight text-slate-900 mb-1">JS-Rentenplaner </h2><p className="text-slate-500 text-xl font-medium">Ihre Zukunft. Heute smart geplant.</p></div>
         </div>
         <div className="text-right">
           <div className="inline-block bg-slate-50 p-4 rounded-xl border border-slate-200 text-left">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Auswertung für</p>
             <p className="text-lg font-black text-slate-800">{isMarried ? `${nameA || 'Person A'} & ${nameB || 'Person B'} (Haushalt)` : (nameA || 'Person A')}</p>
-            <p className="text-xs text-slate-500 mt-2 border-t border-slate-200 pt-2 font-medium flex justify-between gap-4">
-              <span>Datum:</span> <span className="font-bold text-slate-700">{new Date().toLocaleDateString('de-DE')}</span>
-            </p>
+            <p className="text-xs text-slate-500 mt-2 border-t border-slate-200 pt-2 font-medium flex justify-between gap-4"><span>Datum:</span> <span className="font-bold text-slate-700">{new Date().toLocaleDateString('de-DE')}</span></p>
           </div>
         </div>
       </div>
 
       <main className="max-w-6xl mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 print:px-6 print:py-0 print:block">
         
-        {/* PREMIUM PRINT ONLY: ZUSAMMENFASSUNG EINGABEN */}
+        {/* PRINT ONLY: ZUSAMMENFASSUNG */}
         <div className="hidden print:block mb-8 print:break-after-page">
            <h2 className="text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-6 text-slate-800">1. Ihre Eingabedaten & Prämissen</h2>
-           
            <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-6 mb-6">
               <div className="grid grid-cols-3 gap-y-6 gap-x-8 text-sm">
                  <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Alter heute</span> <span className="font-bold text-lg text-slate-800">{Math.floor(calculations.currentAgeA)} Jahre {isMarried ? <span className="text-slate-400 text-sm font-normal">/ {Math.floor(calculations.currentAgeB)} J.</span> : ''}</span></div>
@@ -1496,27 +1394,16 @@ export default function App() {
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
                     <tr className="bg-white text-slate-400 text-[10px] uppercase tracking-wider border-b border-slate-200">
-                      <th className="p-4 font-bold w-24">Schicht</th>
-                      <th className="p-4 font-bold w-40">Art</th>
-                      <th className="p-4 font-bold">Name / Inhaber</th>
-                      <th className="p-4 font-bold text-right">Wert / Beitrag</th>
+                      <th className="p-4 font-bold w-24">Schicht</th><th className="p-4 font-bold w-40">Art</th><th className="p-4 font-bold">Name / Inhaber</th><th className="p-4 font-bold text-right">Wert / Beitrag</th>
                     </tr>
                   </thead>
                   <tbody className="text-slate-800">
                      {contracts.map(c => (
                         <tr key={c.id} className="border-b border-slate-100 last:border-0">
-                           <td className="p-4">
-                              <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${c.layer === 1 ? 'bg-blue-100 text-blue-700' : c.layer === 2 ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'}`}>Schicht {c.layer}</span>
-                           </td>
+                           <td className="p-4"><span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${c.layer === 1 ? 'bg-blue-100 text-blue-700' : c.layer === 2 ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'}`}>Schicht {c.layer}</span></td>
                            <td className="p-4 uppercase text-[11px] font-bold text-slate-500">{c.type.replace('prvKapital', 'Privat (Kapital)').replace('prvRente', 'Privat (Rente)').replace('bavKapital', 'bAV (Kapital)')}</td>
                            <td className="p-4 font-bold text-slate-700">{c.name} {isMarried ? <span className="text-slate-400 font-normal">({c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})</span> : ''}</td>
-                           <td className="p-4 text-sm font-black text-right text-slate-800">
-                              {c.type === 'etf' ? `${formatCurrency(c.capital)}` : 
-                               c.type.includes('Kapital') ? `${formatCurrency(c.gross)}` :
-                               c.type === 'immobilie' ? `${formatCurrency(c.gross)} / M` :
-                               `${formatCurrency(c.gross)} / M`
-                              }
-                           </td>
+                           <td className="p-4 text-sm font-black text-right text-slate-800">{c.type === 'etf' ? `${formatCurrency(c.capital)}` : c.type.includes('Kapital') ? `${formatCurrency(c.gross)}` : c.type === 'immobilie' ? `${formatCurrency(c.gross)} / M` : `${formatCurrency(c.gross)} / M`}</td>
                         </tr>
                      ))}
                   </tbody>
@@ -1533,13 +1420,7 @@ export default function App() {
               <h2 className="text-sm font-bold text-slate-700 print:text-lg print:text-indigo-900">Allgemeine Daten & Ziel</h2>
               <div className="flex items-center gap-2 print:hidden">
                 <label className="text-[10px] text-slate-400 font-bold uppercase hidden sm:block">Name:</label>
-                <input 
-                  type="text" 
-                  value={personTab === 'A' ? nameA : nameB} 
-                  onChange={e => personTab === 'A' ? setNameA(e.target.value) : setNameB(e.target.value)} 
-                  placeholder={personTab === 'A' ? 'Person A' : 'Person B'}
-                  className="w-28 sm:w-36 border border-slate-200 rounded px-2 py-1 text-xs bg-slate-50 focus:bg-white focus:border-indigo-400 outline-none transition-colors"
-                />
+                <input type="text" value={personTab === 'A' ? nameA : nameB} onChange={e => personTab === 'A' ? setNameA(e.target.value) : setNameB(e.target.value)} placeholder={personTab === 'A' ? 'Person A' : 'Person B'} className="w-28 sm:w-36 border border-slate-200 rounded px-2 py-1 text-xs bg-slate-50 focus:bg-white focus:border-indigo-400 outline-none transition-colors" />
               </div>
             </div>
             
@@ -1550,7 +1431,6 @@ export default function App() {
               </div>
             )}
 
-            {/* PERSON DATA MAPPING */}
             {['A', 'B'].filter(p => p === 'A' || isMarried).map(p => (
               <div key={`person-data-${p}`} className={`${personTab === p ? 'block' : 'hidden'} print:block mb-4`}>
                 <h3 className="hidden print:block text-sm font-bold text-slate-700 mb-2 border-b border-slate-100 pb-1">Daten {p === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')}</h3>
@@ -1564,7 +1444,6 @@ export default function App() {
                     <input type="text" placeholder="TT.MM.JJJJ" value={p === 'A' ? retDateA : retDateB} onChange={e => handleRetDateChange(e.target.value, p)} className="w-full border rounded p-2 text-sm" />
                   </div>
                 </div>
-                
                 <div className="text-[10px] text-slate-500 mb-4 bg-slate-50 border border-slate-100 p-2 rounded flex justify-between">
                   <span>Alter heute: <strong className="text-slate-700">{(p === 'A' ? calculations.currentAgeA : calculations.currentAgeB).toFixed(1)} J.</strong></span>
                   <span>Eintrittsalter: <strong className="text-slate-700">{(p === 'A' ? calculations.retirementAgeA : calculations.retirementAgeB).toFixed(1)} J.</strong></span>
@@ -1573,9 +1452,7 @@ export default function App() {
             ))}
             
             <div className="mb-6 p-4 bg-indigo-50/70 rounded-xl border-2 border-indigo-100 shadow-sm print:bg-indigo-50 print:border-indigo-200">
-              <div className="flex justify-between items-center mb-2">
-                 <label className="block text-sm font-bold text-indigo-900">Zielnetto im Alter (Kaufkraft heute)</label>
-              </div>
+              <div className="flex justify-between items-center mb-2"><label className="block text-sm font-bold text-indigo-900">Zielnetto im Alter (Kaufkraft heute)</label></div>
               <input type="number" value={targetIncomeToday} onChange={e => setTargetIncomeToday(parseNum(e.target.value))} className="w-full border-2 border-indigo-200 bg-white rounded-lg p-3 text-xl font-black text-indigo-900 mb-3 shadow-inner outline-none focus:border-indigo-400 transition-colors" />
               
               <div className="border-t-2 border-indigo-200/60 pt-3 mt-3">
@@ -1586,30 +1463,20 @@ export default function App() {
 
                  {showBenchmark && (
                      <div className="mt-5 print:mt-0">
-                         <div className="grid grid-cols-2 gap-4 mb-5">
-                           <div>
-                             <label className="block text-xs font-semibold text-slate-600 mb-1.5">Heutiges Netto (€/M)</label>
-                             <input type="number" value={currentNetIncome} onChange={e => setCurrentNetIncome(parseNum(e.target.value))} className="w-full border border-indigo-200 rounded-lg p-2.5 text-sm font-bold bg-white shadow-sm outline-none focus:border-indigo-400" />
-                           </div>
-                           <div>
-                             <label className="block text-xs font-semibold text-slate-600 mb-1.5">Gehalts-Plus p.a. (%)</label>
-                             <input type="number" step="0.1" value={wageGrowthRate} onChange={e => setWageGrowthRate(parseNum(e.target.value))} className="w-full border border-indigo-200 rounded-lg p-2.5 text-sm font-bold bg-white shadow-sm outline-none focus:border-indigo-400" />
-                           </div>
-                         </div>
+                         {renderSalaryInput('top')}
                          
+                         <div className="mb-5">
+                             <label className="block text-xs font-semibold text-slate-600 mb-1.5">Angenommenes Gehalts-Plus p.a. (%)</label>
+                             <input type="number" step="0.1" value={wageGrowthRate} onChange={e => setWageGrowthRate(parseNum(e.target.value))} className="w-full border border-indigo-200 rounded-lg p-2.5 text-sm font-bold bg-white shadow-sm outline-none focus:border-indigo-400" />
+                         </div>
                          <div className="bg-white p-5 rounded-xl shadow-sm border border-indigo-100 text-center relative overflow-hidden">
                             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-400 to-indigo-600 print:hidden"></div>
-                            
                             <p className="text-sm text-slate-600 mb-2">Ihr Gehalt steigt bis zur Rente voraussichtlich auf:</p>
                             <div className="text-2xl font-bold text-slate-800 mb-4">{formatCurrency(calculations.projectedFinalNet)}</div>
-                            
                             <div className="w-16 border-t-2 border-slate-100 mx-auto my-4"></div>
-                            
                             <p className="text-sm text-slate-600 mb-2">Haushalts-Bedarf im Jahr {calculations.baseRetYear}:</p>
                             <div className="text-2xl font-bold text-indigo-600 mb-4">{formatCurrency(calculations.targetIncomeFuture)}</div>
-
                             <div className="w-16 border-t-2 border-slate-100 mx-auto my-4"></div>
-                            
                             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Ihr Zielnetto entspricht damit</p>
                             <div className="text-5xl font-black text-indigo-600 flex items-center justify-center gap-1 drop-shadow-sm">
                                 {calculations.projectedFinalNet > 0 ? ((calculations.targetIncomeFuture / calculations.projectedFinalNet) * 100).toFixed(0) : 0} <span className="text-3xl text-indigo-400">%</span>
@@ -1641,21 +1508,15 @@ export default function App() {
             </div>
             <div className="p-4 bg-slate-50/50 min-h-[400px] print:min-h-0 print:p-0 print:bg-transparent">
               
-              {/* SCHICHT 1 (GRV & Basisrente) */}
               <div className={`${activeTab === 's1' ? 'block' : 'hidden'} print:block print:mb-8`}>
                 <h3 className="hidden print:block font-bold text-blue-900 mb-4 border-b border-blue-200 pb-1 text-lg">Eingaben: Schicht 1 (Basis)</h3>
                 <div className="space-y-4">
-                  
-                  {/* GRV MAPPING */}
                   {['A', 'B'].filter(p => p === 'A' || isMarried).map(p => (
                     <div key={`grv-${p}`} className={`${personTab === p ? 'block' : 'hidden'} print:block print:mb-4 bg-white p-4 rounded-lg border border-blue-200 shadow-sm relative print:border-slate-300 print:shadow-none`}>
                       <h3 className="text-sm font-bold text-blue-800 mb-3 flex items-center justify-between print:text-slate-800">
                         <span className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 print:text-slate-500" /> Gesetzliche Rente {isMarried ? `(${p === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})` : ''}</span>
-                        <button onClick={() => estimatorPerson === p ? setEstimatorPerson(null) : openEstimator(p)} className="print:hidden text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 flex items-center gap-1 transition-colors">
-                          <Calculator className="w-3 h-3"/> {estimatorPerson === p ? 'Schließen' : 'Schätzen'}
-                        </button>
+                        <button onClick={() => estimatorPerson === p ? setEstimatorPerson(null) : openEstimator(p)} className="print:hidden text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 flex items-center gap-1 transition-colors"><Calculator className="w-3 h-3"/> {estimatorPerson === p ? 'Schließen' : 'Schätzen'}</button>
                       </h3>
-
                       {estimatorPerson === p && (
                           <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100 shadow-inner print:hidden">
                               <h4 className="text-[10px] font-bold text-blue-800 uppercase mb-2">Schnell-Schätzer (Karriere-Kurve)</h4>
@@ -1663,42 +1524,23 @@ export default function App() {
                                   <label className="block text-[10px] font-semibold text-slate-600 mb-1">Heutiges Bruttojahresgehalt (€)</label>
                                   <input type="number" value={estimatorSalary} onChange={e => setEstimatorSalary(parseNum(e.target.value))} className="w-full border border-blue-200 rounded p-2 text-sm bg-white font-mono font-bold" />
                               </div>
-                              <button onClick={() => {
-                                  if (p === 'A') setGrvGrossA(estimatedPension);
-                                  else setGrvGrossB(estimatedPension);
-                                  setEstimatorPerson(null);
-                              }} className="w-full bg-blue-600 text-white text-xs font-bold py-2 rounded hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                                  <CheckCircle className="w-3.5 h-3.5" /> ca. {estimatedPension} € übernehmen
-                              </button>
+                              <button onClick={() => { if (p === 'A') setGrvGrossA(estimatedPension); else setGrvGrossB(estimatedPension); setEstimatorPerson(null); }} className="w-full bg-blue-600 text-white text-xs font-bold py-2 rounded hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"><CheckCircle className="w-3.5 h-3.5" /> ca. {estimatedPension} € übernehmen</button>
                           </div>
                       )}
-
                       <div className="grid grid-cols-2 gap-4">
                         <div><label className="block text-xs font-semibold text-slate-600 mb-1">Anspruch (€/M)</label><input type="number" value={p==='A'?grvGrossA:grvGrossB} onChange={e => p==='A'?setGrvGrossA(parseNum(e.target.value)):setGrvGrossB(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-600 mb-1">Rentensteigerung (%)</label>
-                          <input type="number" step="0.1" value={grvIncreaseRate} onChange={e => {
-                             const val = parseNum(e.target.value);
-                             setGrvIncreaseRate(val);
-                             setTaxIndexRate(val); // Synchronisiert den Index automatisch mit
-                          }} className="w-full border rounded p-2" />
-                        </div>
+                        <div><label className="block text-xs font-semibold text-slate-600 mb-1">Rentensteigerung (%)</label><input type="number" step="0.1" value={grvIncreaseRate} onChange={e => { const val = parseNum(e.target.value); setGrvIncreaseRate(val); setTaxIndexRate(val); }} className="w-full border rounded p-2" /></div>
                       </div>
                       {((p==='A' ? calculations.grvDiscountA : calculations.grvDiscountB) > 0) && (
-                         <div className="mt-3 text-[10px] text-rose-600 bg-rose-50 p-2 rounded flex gap-1.5 border border-rose-100">
-                           <AlertCircle className="w-3 h-3 shrink-0" />
-                           <span>Vorruhestand: Es werden automatisch {((p==='A' ? calculations.grvDiscountA : calculations.grvDiscountB)*100).toFixed(1)}% Abschlag berechnet.</span>
-                         </div>
+                         <div className="mt-3 text-[10px] text-rose-600 bg-rose-50 p-2 rounded flex gap-1.5 border border-rose-100"><AlertCircle className="w-3 h-3 shrink-0" /><span>Vorruhestand: Es werden automatisch {((p==='A' ? calculations.grvDiscountA : calculations.grvDiscountB)*100).toFixed(1)}% Abschlag berechnet.</span></div>
                       )}
                     </div>
                   ))}
-
                   {contracts.filter(c => c.layer === 1).map(renderContractInput)}
                   <button onClick={() => addContract(1)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded text-slate-500 flex items-center justify-center gap-2 hover:border-blue-400 hover:text-blue-600 print:hidden"><PlusCircle className="w-4 h-4" /> Rürup hinzufügen</button>
                 </div>
               </div>
 
-              {/* SCHICHT 2 (bAV / Riester) */}
               <div className={`${activeTab === 's2' ? 'block' : 'hidden'} print:block print:mb-8`}>
                 <h3 className={`hidden ${contracts.filter(c => c.layer === 2).length > 0 ? 'print:block' : 'print:hidden'} font-bold text-purple-900 mb-4 border-b border-purple-200 pb-1 text-lg`}>Eingaben: Schicht 2 (Zusatz)</h3>
                 <div className="space-y-4">
@@ -1707,7 +1549,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* SCHICHT 3 (Privat) */}
               <div className={`${activeTab === 's3' ? 'block' : 'hidden'} print:block print:mb-8`}>
                 <h3 className={`hidden ${contracts.filter(c => c.layer === 3).length > 0 ? 'print:block' : 'print:hidden'} font-bold text-emerald-900 mb-4 border-b border-emerald-200 pb-1 text-lg`}>Eingaben: Schicht 3 (Privat)</h3>
                 <div className="space-y-4">
@@ -1716,7 +1557,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* PLANER */}
               <div className={`${activeTab === 'planer' ? 'block' : 'hidden'} print:block`}>
                  <h3 className="hidden print:block font-bold text-indigo-900 mb-4 border-b border-indigo-200 pb-1 text-lg">Eingaben: Auszahlungs-Planer</h3>
                  <div className="space-y-4">
@@ -1771,7 +1611,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* STEUER-ENGINE TOGGLE */}
           <div className="bg-slate-800 text-slate-200 rounded-xl shadow-sm border border-slate-700 overflow-hidden print:hidden">
             <button onClick={() => setShowTaxInfo(!showTaxInfo)} className="w-full p-4 flex justify-between items-center hover:bg-slate-700 transition-colors">
               <div className="flex items-center gap-3">
@@ -1808,17 +1647,6 @@ export default function App() {
                     <div className="text-[9px] text-slate-500 mt-1">Mindert das zvE (Steuervorteil)</div>
                   </div>
                 </div>
-                
-                <div className="bg-indigo-900/30 border border-indigo-500/30 p-3 rounded-lg flex gap-3 items-start">
-                  <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-indigo-200 leading-relaxed">
-                    <strong>So rechnet die Engine im Hintergrund:</strong> Die App summiert alle steuerpflichtigen Einkünfte aus Schicht 1, 2 und 3. 
-                    Gesetzliche Renten werden automatisch mit dem Kohorten-Besteuerungsanteil für das Jahr {calculations.baseRetYear} angesetzt. 
-                    Private Renten (Schicht 3) werden nach § 22 EStG nur mit dem Ertragsanteil von {isMarried ? 'ca. 17%' : '17%'} (bei Alter 67) besteuert. 
-                    Anschließend werden die berechneten Kranken- und Pflegeversicherungsbeiträge steuermindernd abgezogen, bevor der 
-                    progressiv ansteigende EStG-Tarif (inkl. {isMarried ? 'Ehegattensplitting' : 'Grundtarif'} und {taxIndexRate}% p.a. Tarif-Indexierung) angewendet wird.
-                  </p>
-                </div>
               </div>
             )}
           </div>
@@ -1828,21 +1656,19 @@ export default function App() {
             <button onClick={() => setRightView('verlauf')} className={`flex-1 py-2 rounded text-xs font-bold flex justify-center gap-2 ${rightView === 'verlauf' ? 'bg-white shadow' : 'text-slate-500'}`}><LineChartIcon className="w-4 h-4" /> Verlauf</button>
           </div>
 
-          {/* KASSENBON - EXAKT WIE GEWÜNSCHTES DESIGN */}
           <div className={`bg-white rounded-xl shadow-sm border p-6 print:block print:break-inside-avoid ${rightView === 'zusammensetzung' ? 'block' : 'hidden'}`}>
             <h2 className="text-sm font-bold mb-4 print:hidden">Ihr Haushalts-Netto im Jahr {calculations.baseRetYear}</h2>
             
-            {/* FORTSCHRITTSBALKEN (DECKUNG) */}
             <div className="mb-6 print:mt-4">
               <div className="flex justify-between text-[10px] text-slate-500 font-bold uppercase mb-1">
                 <span>Ziel-Erreichung</span>
                 <span>{calculations.gap > 0 && calculations.targetIncomeFuture > 0 ? `${((calculations.totalNetFuture / calculations.targetIncomeFuture) * 100).toFixed(1)} % erreicht` : 'Ziel erreicht / übertroffen'}</span>
               </div>
               <div className="h-4 w-full bg-slate-100 rounded-full flex overflow-hidden shadow-inner border border-slate-200" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}>
-                {(calculations.s1_net > 0) && <div style={{ width: `${(calculations.s1_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-blue-500 transition-all duration-500" title={`Schicht 1: ${formatCurrency(calculations.s1_net)}`}></div>}
-                {(calculations.s2_net > 0) && <div style={{ width: `${(calculations.s2_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-purple-500 transition-all duration-500" title={`Schicht 2: ${formatCurrency(calculations.s2_net)}`}></div>}
-                {(calculations.s3_net > 0) && <div style={{ width: `${(calculations.s3_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-emerald-500 transition-all duration-500" title={`Schicht 3: ${formatCurrency(calculations.s3_net)}`}></div>}
-                {(calculations.gap > 0) && <div style={{ width: `${(calculations.gap / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-white transition-all duration-500" title={`Lücke: ${formatCurrency(calculations.gap)}`}></div>}
+                {(calculations.s1_net > 0) && <div style={{ width: `${(calculations.s1_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-blue-500 transition-all duration-500"></div>}
+                {(calculations.s2_net > 0) && <div style={{ width: `${(calculations.s2_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-purple-500 transition-all duration-500"></div>}
+                {(calculations.s3_net > 0) && <div style={{ width: `${(calculations.s3_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-emerald-500 transition-all duration-500"></div>}
+                {(calculations.gap > 0) && <div style={{ width: `${(calculations.gap / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-white transition-all duration-500"></div>}
               </div>
               <div className="flex gap-3 mt-2 text-[9px] font-semibold text-slate-500 flex-wrap">
                 <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></span> Schicht 1</div>
@@ -1853,7 +1679,6 @@ export default function App() {
             </div>
 
             <div className="space-y-4">
-              
               <div className="border border-blue-100 rounded-lg print:border-slate-300 overflow-hidden mb-3">
                 <div className="flex justify-between p-3 sm:p-4 bg-white cursor-pointer print:bg-white border-b border-blue-50" onClick={() => toggleSection('s1')}>
                   <div className="font-bold text-sm sm:text-base text-blue-900">Schicht 1 (Basis)</div>
@@ -1893,10 +1718,7 @@ export default function App() {
                   {calculations.contracts.filter(c=>c.layer===3).map(c => renderBonContract(c))}
                   {includePlanerInNet && (
                     <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
-                       <div className="flex justify-between items-center mb-1">
-                         <div className="font-semibold text-sm text-blue-900">Planer Wunsch-Rente</div>
-                         <div className="font-bold text-base text-slate-800">{renderBonVal(calculations.finalPlanerWithdrawal)}</div>
-                       </div>
+                       <div className="flex justify-between items-center mb-1"><div className="font-semibold text-sm text-blue-900">Planer Wunsch-Rente</div><div className="font-bold text-base text-slate-800">{renderBonVal(calculations.finalPlanerWithdrawal)}</div></div>
                        <div className="flex justify-between items-end text-[10px] text-slate-500">
                          <div>Brutto: {formatResultCurrency(calculations.finalPlanerWithdrawalGross)}</div>
                          {calculations.planerTax > 0 && <div className="text-rose-500 text-right leading-tight">Abgeltung: {formatResultCurrency(calculations.planerTax + (calculations.planerKist || 0))}</div>}
@@ -1913,7 +1735,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* CHART */}
           <div className={`bg-white rounded-xl border p-6 h-auto print:block print:mt-8 print:break-inside-avoid ${rightView === 'verlauf' ? 'block' : 'hidden'}`}>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-sm font-bold">Einkommensverlauf (Netto / Monat)</h2>
@@ -1926,19 +1747,12 @@ export default function App() {
             <div className="w-full h-[280px] relative" onMouseLeave={() => setHoveredData(null)}>
               {hoveredData && (
                   <div className="absolute bg-white border border-slate-200 shadow-xl rounded-lg p-3 text-xs z-10 pointer-events-none print:hidden transition-all duration-100"
-                       style={{ 
-                           left: `${(hoveredData.cx / svgWidth) * 100}%`, 
-                           top: '20px', 
-                           transform: hoveredData.index > visibleChartData.length / 2 ? 'translateX(calc(-100% - 15px))' : 'translateX(15px)' 
-                       }}>
+                       style={{ left: `${(hoveredData.cx / svgWidth) * 100}%`, top: '20px', transform: hoveredData.index > visibleChartData.length / 2 ? 'translateX(calc(-100% - 15px))' : 'translateX(15px)' }}>
                       <div className="font-bold text-slate-700 mb-2 border-b border-slate-100 pb-1">Alter {hoveredData.age} (Jahr {hoveredData.year})</div>
                       {!hoveredData.isRetirement ? (
                           <div className="text-slate-600 flex justify-between gap-4"><span>Gehalt (Netto):</span> <span className="font-bold">{formatChartCurrency(hoveredData.totalNet, hoveredData.discount)}</span></div>
                       ) : (
-                          <>
-                              <div className="text-indigo-600 flex justify-between gap-4 mb-1"><span>Gesamt-Netto:</span> <span className="font-bold">{formatChartCurrency(hoveredData.totalNet, hoveredData.discount)}</span></div>
-                              {includePlanerInNet && hoveredData.planer > 0 && <div className="text-[10px] text-slate-500 flex justify-between gap-4"><span>davon Planer:</span> <span>{formatChartCurrency(hoveredData.planer, hoveredData.discount)}</span></div>}
-                          </>
+                          <><div className="text-indigo-600 flex justify-between gap-4 mb-1"><span>Gesamt-Netto:</span> <span className="font-bold">{formatChartCurrency(hoveredData.totalNet, hoveredData.discount)}</span></div>{includePlanerInNet && hoveredData.planer > 0 && <div className="text-[10px] text-slate-500 flex justify-between gap-4"><span>davon Planer:</span> <span>{formatChartCurrency(hoveredData.planer, hoveredData.discount)}</span></div>}</>
                       )}
                       <div className="text-amber-600 mt-2 pt-1 border-t border-slate-100 flex justify-between gap-4"><span>Bedarf (Ziel):</span> <span className="font-bold">{formatChartCurrency(hoveredData.target, hoveredData.discount)}</span></div>
                   </div>
@@ -1950,31 +1764,23 @@ export default function App() {
                     <text x={paddingX - 10} y={getY(val) + 4} fontSize="13" fontWeight="bold" fill="#64748b" textAnchor="end">{formatYAxis(val)}</text>
                   </g>
                 ))}
-                
                 {visibleChartData.map((d, i) => {
                   const cx = paddingX + i * stepX + stepX / 2;
                   const val = showRealValue ? (d.totalNet / (d.discount || 1)) : d.totalNet;
                   const h = Math.max(0, (val / maxY) * graphHeight);
                   const yPos = svgHeight - bottomPadding - h;
                   const barColor = !d.isRetirement ? '#94a3b8' : '#6366f1'; 
-
                   return (
                     <g key={`bar-${i}`}>
                       <rect x={cx - barWidth/2} y={yPos} width={barWidth} height={h} fill={barColor} rx="2" className="transition-all duration-300" opacity={hoveredData && hoveredData.index !== i ? 0.5 : 1} />
                       {(i === 0 || d.year === calculations.baseRetYear || d.age % 5 === 0 || i === visibleChartData.length - 1) && (
-                        <>
-                           <text x={cx} y={svgHeight - 10} fontSize="12" fontWeight="bold" fill="#64748b" textAnchor="middle">{d.age} J.</text>
-                           <line x1={cx} y1={svgHeight - bottomPadding} x2={cx} y2={svgHeight - bottomPadding + 5} stroke="#cbd5e1" />
-                        </>
+                        <><text x={cx} y={svgHeight - 10} fontSize="12" fontWeight="bold" fill="#64748b" textAnchor="middle">{d.age} J.</text><line x1={cx} y1={svgHeight - bottomPadding} x2={cx} y2={svgHeight - bottomPadding + 5} stroke="#cbd5e1" /></>
                       )}
                     </g>
                   );
                 })}
-
                 <line x1={paddingX} y1={svgHeight - bottomPadding} x2={svgWidth - paddingX} y2={svgHeight - bottomPadding} stroke="#94a3b8" strokeWidth="2" />
-                
                 <path d={targetPath} fill="none" stroke="#f59e0b" strokeWidth="2" strokeDasharray="4 4" />
-
                 {visibleChartData.map((d, i) => {
                   const cx = paddingX + i * stepX + stepX / 2;
                   return <rect key={`hover-${i}`} x={cx - stepX/2} y={0} width={stepX} height={svgHeight - bottomPadding} fill="transparent" onMouseEnter={() => setHoveredData({ ...d, index: i, cx })} className="cursor-crosshair print:hidden" />;
@@ -1982,38 +1788,21 @@ export default function App() {
               </svg>
             </div>
             
-            {/* NEU: ZEITREISEN-SLIDER */}
             <div className="mt-8 flex items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 print:hidden shadow-inner">
                <span className="text-xs font-bold text-slate-500 whitespace-nowrap bg-white px-2 py-1 rounded shadow-sm">Alter {Math.floor(calculations.currentAgeA)}</span>
                <div className="flex-1 relative">
-                 <input 
-                    type="range" 
-                    min={Math.floor(calculations.currentAgeA)} 
-                    max={105 - chartWindowSize} 
-                    value={activeStartAge} 
-                    onChange={e => setManualChartStart(Number(e.target.value))} 
-                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                 />
+                 <input type="range" min={Math.floor(calculations.currentAgeA)} max={105 - chartWindowSize} value={activeStartAge} onChange={e => setManualChartStart(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
                  <div className="text-[10px] text-center text-slate-400 font-medium mt-1 uppercase tracking-wider">Zeitleiste verschieben</div>
                </div>
                <span className="text-xs font-bold text-slate-500 whitespace-nowrap bg-white px-2 py-1 rounded shadow-sm">Alter 105</span>
                <div className="w-px h-6 bg-slate-300 mx-1"></div>
-               <button 
-                  onClick={() => setManualChartStart(null)} 
-                  className="text-xs flex items-center gap-1.5 bg-white border border-slate-300 text-slate-600 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-100 hover:text-indigo-600 transition-all shadow-sm"
-                  title="Zurück zum Renteneintritt springen"
-               >
-                  <Clock className="w-3.5 h-3.5" /> Fokus Rente
-               </button>
+               <button onClick={() => setManualChartStart(null)} className="text-xs flex items-center gap-1.5 bg-white border border-slate-300 text-slate-600 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-100 hover:text-indigo-600 transition-all shadow-sm" title="Zurück zum Renteneintritt springen"><Clock className="w-3.5 h-3.5" /> Fokus Rente</button>
             </div>
           </div>
 
-          {/* LÖSUNGS-RECHNER & OPTIMIZER */}
           <div className="bg-slate-900 rounded-xl border border-slate-800 text-white print:bg-white print:text-slate-800 print:border-slate-300 print:break-inside-avoid overflow-hidden">
               <button onClick={() => setShowOptimizer(!showOptimizer)} className="w-full p-6 flex justify-between items-center hover:bg-slate-800 transition-colors print:bg-slate-50">
-                  <h3 className="text-sm font-bold text-indigo-400 flex items-center gap-2 print:text-indigo-700">
-                      <Activity className="w-5 h-5" /> Smart Optimizer: Rentenlücke schließen
-                  </h3>
+                  <h3 className="text-sm font-bold text-indigo-400 flex items-center gap-2 print:text-indigo-700"><Activity className="w-5 h-5" /> Smart Optimizer: Rentenlücke schließen</h3>
                   {showOptimizer ? <ChevronUp className="w-5 h-5 text-slate-400 print:text-slate-500"/> : <ChevronDown className="w-5 h-5 text-slate-400 print:text-slate-500"/>}
               </button>
               
@@ -2033,7 +1822,6 @@ export default function App() {
                                 <div className="text-2xl font-bold text-white print:text-slate-800">{formatCurrency(calculations.requiredSavings)}</div>
                             </div>
                           </div>
-
                           <div className="flex gap-4 pt-4 border-t border-slate-800 print:border-slate-200 mt-2">
                                <div className="flex-1">
                                    <label className="block text-[9px] text-slate-400 uppercase mb-1">Rendite p.a. (%)</label>
@@ -2046,8 +1834,7 @@ export default function App() {
                                    </select>
                                    {solutionSavingsDynamic > 0 && calculations.requiredSavings > 0 && (
                                        <div className="text-[9px] text-slate-400 mt-1.5 leading-tight">
-                                           Letzte Rate (vor Rente):<br/>
-                                           <span className="font-bold text-slate-300 print:text-slate-600">{formatCurrency(calculations.requiredSavings * Math.pow(1 + solutionSavingsDynamic / 100, Math.max(0, Math.floor(calculations.maxYearsToRet) - 1)))}</span>
+                                           Letzte Rate (vor Rente):<br/><span className="font-bold text-slate-300 print:text-slate-600">{formatCurrency(calculations.requiredSavings * Math.pow(1 + solutionSavingsDynamic / 100, Math.max(0, Math.floor(calculations.maxYearsToRet) - 1)))}</span>
                                        </div>
                                    )}
                                </div>
@@ -2061,23 +1848,14 @@ export default function App() {
         </div>
       </main>
 
-      {/* NEUER BEREICH: VERTRAGS-TÜV MULTI-COMPARISON */}
       <div className="max-w-6xl mx-auto p-4 sm:p-6 mb-24 print:block print:break-before-page">
          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 border-b-2 border-amber-200 pb-4">
              <div>
-                 <div className="flex items-center gap-3 font-bold text-amber-800 text-2xl">
-                    <SearchCheck className="w-8 h-8"/> Vertrags-TÜV: Der große Vergleich
-                 </div>
-                 <p className="text-sm text-slate-600 mt-2 max-w-3xl leading-relaxed">
-                    Stellen Sie Ihre Verträge direkt nebeneinander. Die Engine schätzt Ihren heutigen Steuersatz auf Basis Ihres Gehalts ({formatCurrency(currentNetIncome)}) und berechnet den echten Netto-Aufwand. Im Rentenalter werden Steuern und KV/PV-Abzüge exakt abgezogen. So finden Sie heraus, welcher Vertrag die beste Netto-Rendite liefert!
-                 </p>
+                 <div className="flex items-center gap-3 font-bold text-amber-800 text-2xl"><SearchCheck className="w-8 h-8"/> Vertrags-TÜV: Der große Vergleich</div>
+                 <p className="text-sm text-slate-600 mt-2 max-w-3xl leading-relaxed">Stellen Sie Ihre Verträge direkt nebeneinander. Die Engine berechnet Ihren exakten Grenzsteuersatz und die reale SV-Ersparnis auf Basis Ihres Gehalts ({formatCurrency(currentFinancials.avgMonthlyGross)} Brutto / Monat).</p>
              </div>
              <div className="shrink-0 bg-amber-100 p-2 rounded-xl border border-amber-200 shadow-sm relative z-10">
-                 <select 
-                     value="" 
-                     onChange={(e) => { if(e.target.value) addTuevItem(e.target.value); }} 
-                     className="bg-white border-2 border-amber-300 text-amber-900 rounded-lg p-2.5 text-sm font-bold shadow-sm outline-none hover:border-amber-400 cursor-pointer w-full md:w-auto"
-                 >
+                 <select value="" onChange={(e) => { if(e.target.value) addTuevItem(e.target.value); }} className="bg-white border-2 border-amber-300 text-amber-900 rounded-lg p-2.5 text-sm font-bold shadow-sm outline-none hover:border-amber-400 cursor-pointer w-full md:w-auto">
                      <option value="">➕ Vertrag hinzufügen...</option>
                      {contracts.filter(c => ['basis', 'bav', 'bavKapital', 'riester', 'prvRente', 'prvKapital', 'etf'].includes(c.type)).map(c => (
                         <option key={c.id} value={c.id}>Schicht {c.layer} | {c.name || c.type.toUpperCase()}</option>
@@ -2086,9 +1864,11 @@ export default function App() {
              </div>
          </div>
          
-         {/* Global Tax Indicators */}
+         {/* NEU: Integriertes & synchronisiertes Gehaltsfeld */}
+         {renderSalaryInput('tuev')}
+         
          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-inner">
-             <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-center">
+             <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-center group relative">
                 <div className="text-[11px] text-slate-500 uppercase font-bold mb-0.5">Ihr heutiger Grenzsteuersatz</div>
                 <div className="text-lg font-black text-emerald-600">{(tuevData.marginalTaxNow * 100).toFixed(1)} %</div>
                 <div className="text-[11px] text-slate-400 mt-1 leading-tight">Steuerersparnis auf genau die Euro, die in die bAV/Rürup fließen (Progressionsspitze, <strong>nicht</strong> der Durchschnittsteuersatz!).</div>
@@ -2098,7 +1878,7 @@ export default function App() {
                     <div className="absolute right-0 top-0 bottom-0 w-1 bg-emerald-400"></div>
                     <div className="text-[11px] text-slate-500 uppercase font-bold mb-0.5">Ihre SV-Ersparnis heute</div>
                     <div className="text-lg font-black text-emerald-600">{(tuevData.svNow * 100).toFixed(1)} %</div>
-                    <div className="text-[11px] text-slate-500 mt-1 leading-tight">Ersparnis bei RV/AV/KV/PV. <br/><span className="text-emerald-700 font-bold">Gesamte Förderquote: {((tuevData.marginalTaxNow + tuevData.svNow) * 100).toFixed(1)} %</span> auf Ihren Bruttobeitrag!</div>
+                    <div className="text-[11px] text-slate-500 mt-1 leading-tight">Ersparnis bei RV/AV/KV/PV. <br/><span className="text-emerald-700 font-bold">Status: {tuevData.svText}</span></div>
                  </div>
              )}
              <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-center">
@@ -2108,7 +1888,6 @@ export default function App() {
              </div>
          </div>
          
-         {/* Comparison Grid */}
          {tuevData.items.length === 0 ? (
              <div className="bg-amber-50 h-48 rounded-xl border-2 border-dashed border-amber-200 flex flex-col items-center justify-center text-amber-600/50">
                  <Activity className="w-12 h-12 mb-2" />
@@ -2117,11 +1896,12 @@ export default function App() {
          ) : (
              <div className="flex flex-col gap-6 print:gap-4 pb-6 pt-2 px-1">
                  {tuevData.items.map((item, index) => {
-                     if (item.invalid) return null;
+                     const selectedC = contracts.find(c => c.id === item.contractId);
+                     if (item.invalid || !selectedC) return null;
+                     
                      return (
                          <div key={item.id} className="bg-white rounded-xl shadow-md border border-slate-200 shrink-0 flex flex-col lg:flex-row print:flex-row overflow-hidden relative w-full print:break-inside-avoid print:shadow-none print:border-slate-300">
                              
-                             {/* Warning if no payout (Absolute Positioned over header) */}
                              {item.payoutGross === 0 && (
                                  <div className="absolute top-0 left-0 right-0 z-10 bg-rose-50 text-rose-600 text-xs p-2.5 print:p-2 border-b border-rose-200 flex items-center justify-center gap-2">
                                      <AlertCircle className="w-5 h-5 shrink-0 print:w-4 print:h-4" />
@@ -2136,22 +1916,73 @@ export default function App() {
                                          <div className="text-[11px] print:text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Schicht {item.layer} | {item.cType.toUpperCase()}</div>
                                          <div className="font-bold text-slate-800 text-lg" title={item.name}>{item.name || 'Ohne Name'}</div>
                                      </div>
-                                     <button onClick={() => removeTuevItem(item.id)} className="text-slate-400 hover:bg-rose-100 hover:text-rose-600 p-2 rounded-lg transition-colors print:hidden" title="Aus Vergleich entfernen">
-                                         <Trash className="w-5 h-5" />
-                                     </button>
+                                     <button onClick={() => removeTuevItem(item.id)} className="text-slate-400 hover:bg-rose-100 hover:text-rose-600 p-2 rounded-lg transition-colors print:hidden" title="Aus Vergleich entfernen"><Trash className="w-5 h-5" /></button>
                                  </div>
 
                                  <div className="space-y-4 print:space-y-3">
-                                     <div>
-                                         <label className="block text-xs font-bold text-slate-500 mb-1.5 print:mb-1">Ihr mtl. Gesamt-Beitrag (Brutto)</label>
-                                         <input type="number" value={item.grossMonthly} onChange={e => updateTuevItem(item.id, 'grossMonthly', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 text-sm font-semibold bg-white shadow-sm print:shadow-none" />
-                                     </div>
+                                     {item.cType !== 'riester' && (
+                                         <div className="grid grid-cols-2 gap-4 print:gap-3 mb-4">
+                                             <div>
+                                                 <label className="block text-[11px] font-bold text-slate-500 mb-1.5 print:mb-1">{item.cType === 'etf' ? 'Mtl. Sparrate (Start)' : 'Mtl. Beitrag (Start)'}</label>
+                                                 <input type="number" value={item.grossMonthly} onChange={e => updateTuevItem(item.id, 'grossMonthly', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 text-sm font-semibold bg-white shadow-sm print:shadow-none" />
+                                             </div>
+                                             <div>
+                                                 <label className="block text-[11px] font-bold text-slate-500 mb-1.5 print:mb-1">Dynamik p.a. (%)</label>
+                                                 <input type="number" step="0.1" value={item.dynamic || 0} onChange={e => updateTuevItem(item.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 text-sm font-semibold bg-white shadow-sm print:shadow-none" />
+                                             </div>
+                                         </div>
+                                     )}
+
+                                     {item.cType === 'riester' && (
+                                         <>
+                                             <div className="grid grid-cols-2 gap-4 print:gap-3 mb-4">
+                                                 <div>
+                                                     <label className="block text-[11px] font-bold text-slate-500 mb-1.5 print:mb-1">Start-Eigenbeitrag (€)</label>
+                                                     <input type="number" value={item.grossMonthly} onChange={e => updateTuevItem(item.id, 'grossMonthly', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 text-sm font-semibold bg-white shadow-sm print:shadow-none" />
+                                                 </div>
+                                                 <div>
+                                                     <label className="block text-[11px] font-bold text-slate-500 mb-1.5 print:mb-1">Dynamik p.a. (%)</label>
+                                                     <input type="number" step="0.1" value={item.dynamic || 0} onChange={e => updateTuevItem(item.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 text-sm font-semibold bg-white shadow-sm print:shadow-none" />
+                                                 </div>
+                                             </div>
+                                             <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-100 print:bg-white print:border-slate-200">
+                                                 <div className="mb-3">
+                                                     <label className="block text-xs font-bold text-slate-500 mb-1.5 print:mb-1">Jährliche Grundzulage (€)</label>
+                                                     <input type="number" value={item.subsidyRiester} onChange={e => updateTuevItem(item.id, 'subsidyRiester', parseNum(e.target.value))} className="w-full border border-blue-200 rounded-md p-1.5 text-sm bg-white" />
+                                                 </div>
+                                                 <div className="pt-3 border-t border-blue-100/50">
+                                                     <div className="flex justify-between items-center mb-2">
+                                                         <label className="block text-xs font-bold text-blue-900 print:text-slate-700">Kinderzulagen</label>
+                                                         <button onClick={() => addTuevChild(item.id)} className="text-[10px] bg-blue-600 text-white px-2 py-1.5 rounded font-bold hover:bg-blue-700 transition-colors print:hidden flex items-center gap-1 shadow-sm"><PlusCircle className="w-3 h-3"/> Kind</button>
+                                                     </div>
+                                                     {(item.children || []).map((child) => {
+                                                         const amount = child.birthYear >= 2008 ? 300 : 185;
+                                                         const currentYearNum = new Date().getFullYear();
+                                                         const remaining = Math.max(0, 25 - (currentYearNum - child.birthYear));
+                                                         return (
+                                                             <div key={child.id} className="flex items-center gap-2 mb-2 last:mb-0">
+                                                                 <div className="flex-1 relative">
+                                                                     <input type="number" value={child.birthYear} onChange={e => updateTuevChild(item.id, child.id, 'birthYear', parseNum(e.target.value))} className="w-full border border-blue-200 rounded p-1.5 text-xs bg-white pl-14" placeholder="Jahr"/>
+                                                                     <span className="absolute left-2 top-2 text-[10px] uppercase text-slate-400 font-bold">Geb.</span>
+                                                                 </div>
+                                                                 <div className={`border rounded px-2 py-1.5 text-xs font-bold w-[70px] text-center ${remaining > 0 ? 'bg-white border-blue-200 text-blue-700' : 'bg-slate-100 border-slate-200 text-slate-400 line-through'}`}>+{amount} €</div>
+                                                                 <div className="text-[10px] text-slate-500 w-12 text-right leading-tight hidden sm:block">
+                                                                    {remaining > 0 ? `noch ${remaining} J.` : 'Abgelaufen'}
+                                                                 </div>
+                                                                 <button onClick={() => removeTuevChild(item.id, child.id)} className="text-slate-300 hover:text-rose-500 print:hidden transition-colors"><Trash className="w-4 h-4"/></button>
+                                                             </div>
+                                                         )
+                                                     })}
+                                                     {(!item.children || item.children.length === 0) && (
+                                                         <div className="text-[10px] text-slate-400 italic">Keine Kinderzulagen hinterlegt.</div>
+                                                     )}
+                                                 </div>
+                                             </div>
+                                         </>
+                                     )}
                                      
                                      {item.cType.includes('bav') && (
-                                         <div><label className="block text-xs font-bold text-slate-500 mb-1.5 print:mb-1">Davon AG-Zuschuss (€)</label><input type="number" value={item.subsidyBav} onChange={e => updateTuevItem(item.id, 'subsidyBav', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 text-sm bg-white shadow-sm print:shadow-none" /></div>
-                                     )}
-                                     {item.cType === 'riester' && (
-                                         <div><label className="block text-xs font-bold text-slate-500 mb-1.5 print:mb-1">Jährliche Zulagen (€)</label><input type="number" value={item.subsidyRiester} onChange={e => updateTuevItem(item.id, 'subsidyRiester', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 text-sm bg-white shadow-sm print:shadow-none" /></div>
+                                         <div><label className="block text-xs font-bold text-slate-500 mb-1.5 print:mb-1">Davon AG-Zuschuss (Start-Wert)</label><input type="number" value={item.subsidyBav} onChange={e => updateTuevItem(item.id, 'subsidyBav', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 text-sm bg-white shadow-sm print:shadow-none" /></div>
                                      )}
 
                                      <div className="grid grid-cols-2 gap-4 print:gap-3">
@@ -2159,12 +1990,20 @@ export default function App() {
                                             <label className="block text-xs font-bold text-slate-500 mb-1.5 print:mb-1">Vertragsbeginn</label>
                                             <input type="text" placeholder="TT.MM.JJJJ" value={item.safeStartDate} onChange={e => updateTuevItem(item.id, 'startDate', formatDateInput(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 text-sm bg-white shadow-sm print:shadow-none" />
                                          </div>
-                                         {!item.isKapital && (
+                                         {(!item.isKapital && item.cType !== 'etf') && (
                                              <div>
                                                 <label className="block text-xs font-bold text-slate-500 mb-1.5 print:mb-1">Lebenserwartung</label>
                                                 <div className="relative">
                                                    <input type="number" value={item.safeLifeExpectancy} onChange={e => updateTuevItem(item.id, 'lifeExpectancy', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-2 print:p-1.5 text-sm bg-white shadow-sm print:shadow-none pr-12 print:pr-10" />
                                                    <span className="absolute right-3 print:right-2 top-2 print:top-1.5 text-sm print:text-xs text-slate-400">Alter</span>
+                                                </div>
+                                             </div>
+                                         )}
+                                         {(item.cType === 'etf' && !item.isKapital) && (
+                                             <div>
+                                                <label className="block text-xs font-bold text-slate-500 mb-1.5 print:mb-1">Entnahme-Dauer</label>
+                                                <div className="text-sm font-bold text-slate-700 bg-slate-100 p-2 print:p-1.5 rounded-md border border-slate-200">
+                                                    {item.statutoryYears} Jahre
                                                 </div>
                                              </div>
                                          )}
@@ -2174,26 +2013,47 @@ export default function App() {
 
                              {/* MIDDLE COLUMN: Einzahlung vs Auszahlung */}
                              <div className={`w-full lg:w-[32%] print:w-[32%] p-5 print:p-4 flex flex-col justify-center gap-4 print:gap-3 border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-slate-100 ${item.payoutGross === 0 ? 'pt-12 print:pt-10' : ''}`}>
-                                 {/* Results: Einzahlung */}
                                  <div className="bg-slate-50 rounded-xl print:rounded-lg p-3 print:p-2.5 border border-slate-200">
                                      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Ihre echte Belastung (Ansparphase)</div>
-                                     <div className="space-y-1 mb-2">
-                                         <div className="flex justify-between text-[11px] text-slate-600"><span>Brutto-Beitrag:</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
-                                         {item.agZuschuss > 0 && <div className="flex justify-between text-[11px] text-emerald-600"><span>AG-Zuschuss:</span> <span>- {formatCurrency(item.agZuschuss)}</span></div>}
-                                         {item.zulagenMonatlich > 0 && <div className="flex justify-between text-[11px] text-emerald-600"><span>Zulagen:</span> <span>- {formatCurrency(item.zulagenMonatlich)}</span></div>}
-                                         {item.steuerErsparnis > 0 && <div className="flex justify-between text-[11px] text-emerald-600"><span>Steuer-Vorteil:</span> <span>- {formatCurrency(item.steuerErsparnis)}</span></div>}
-                                         {item.svErsparnis > 0 && <div className="flex justify-between text-[11px] text-emerald-600"><span>SV-Ersparnis:</span> <span>- {formatCurrency(item.svErsparnis)}</span></div>}
+                                     <div className="space-y-1 mb-2 relative group">
+                                         {item.cType === 'riester' ? (
+                                             <>
+                                                <div className="flex justify-between text-[11px] text-slate-600"><span>Mtl. Eigenbeitrag (Start):</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
+                                                <div className="flex justify-between text-[11px] text-emerald-600" title="Zulagen mindern nicht den monatlichen Aufwand, sondern fließen zusätzlich in den Vertrag."><span>+ Zulagen (in Vertrag) <Info className="w-3 h-3 inline opacity-50"/>:</span> <span>+ {formatCurrency(item.snapshotZulage)}</span></div>
+                                                {item.snapshotSteuerErsparnis > 0 && <div className="flex justify-between text-[11px] text-emerald-600 cursor-help" title={`Günstigerprüfung: Max. 2100€ p.a. werden mit Ihrem Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%) multipliziert. Davon werden die Zulagen abgezogen.`}><span>- Steuer-Erstattung (Start) <Info className="w-3 h-3 inline text-emerald-400"/>:</span> <span>- {formatCurrency(item.snapshotSteuerErsparnis)}</span></div>}
+                                             </>
+                                         ) : item.cType.includes('bav') ? (
+                                             <>
+                                                 <div className="flex justify-between text-[11px] text-slate-600"><span>Gesamtbeitrag (Start):</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
+                                                 {item.agZuschuss > 0 && <div className="flex justify-between text-[11px] text-emerald-600"><span>- AG-Zuschuss (Start):</span> <span>- {formatCurrency(item.agZuschuss)}</span></div>}
+                                                 <div className="flex justify-between text-[11px] font-bold text-slate-700 border-t border-slate-200 pt-1 mt-1"><span>= Entgeltumwandlung (Start):</span> <span>{formatCurrency(item.grossMonthly - item.agZuschuss)}</span></div>
+                                             </>
+                                         ) : (
+                                             <div className="flex justify-between text-[11px] text-slate-600"><span>{item.cType === 'etf' ? 'Sparrate' : 'Brutto-Beitrag'} (Start):</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
+                                         )}
+                                         
+                                         {item.cType !== 'riester' && item.svErsparnis > 0 && <div className="flex justify-between text-[11px] text-emerald-600"><span>- SV-Ersparnis:</span> <span>- {formatCurrency(item.svErsparnis)}</span></div>}
+                                         {item.cType !== 'riester' && item.cType.includes('bav') && item.svErsparnis === 0 && (
+                                             <div className="flex justify-between text-[9px] text-slate-400 italic"><span>- SV-Ersparnis:</span> <span>0 € (über BBG)</span></div>
+                                         )}
+
+                                         {item.cType !== 'riester' && item.steuerErsparnis > 0 && <div className="flex justify-between text-[11px] text-emerald-600 cursor-help" title={item.cType === 'basis' ? `Der Beitrag wird zu 100% als Sonderausgabe angesetzt und mindert Ihre Steuerlast um Ihren Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%).` : `Die Entgeltumwandlung (minus SV-Ersparnis) ist steuerfrei. Ersparnis = Betrag × Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%).`}><span>- Steuer-Ersparnis <Info className="w-3 h-3 inline text-emerald-400"/>:</span> <span>- {formatCurrency(item.steuerErsparnis)}</span></div>}
                                      </div>
-                                     <div className="flex justify-between items-end border-t border-slate-200 pt-2">
-                                         <div className="text-xs font-bold text-slate-800">Echter Netto-Aufwand:</div>
+                                     {item.cType === 'etf' && (selectedC.capital > 0 || selectedC.specialPayment > 0) && (
+                                         <div className="text-[9px] text-slate-500 italic mt-1 pt-1 border-t border-slate-100 leading-tight">
+                                            zzgl. Startkapital {formatCurrency(selectedC.capital || 0)} 
+                                            {selectedC.specialPayment > 0 ? ` & Einmalzahlung ${formatCurrency(selectedC.specialPayment)}` : ''}
+                                         </div>
+                                     )}
+                                     <div className="flex justify-between items-end border-t border-slate-200 pt-2 mt-2">
+                                         <div className="text-xs font-bold text-slate-800">Netto-Aufwand (Start):</div>
                                          <div className="text-right">
                                              <div className="text-sm font-black text-slate-800">{formatCurrency(item.echterNettoAufwand)} <span className="text-[11px] font-normal text-slate-500">/ M</span></div>
-                                             <div className="text-[11px] text-slate-500 font-medium">Gesamt bis Rente: {formatCurrency(item.summeNettoEinzahlung)}</div>
+                                             <div className="text-[11px] text-slate-500 font-medium mt-0.5">Gesamt {item.dynamic > 0 ? '(inkl. Dyn.)' : 'bis Rente'}: {formatCurrency(item.summeNettoEinzahlung)}</div>
                                          </div>
                                      </div>
                                  </div>
 
-                                 {/* Results: Auszahlung */}
                                  <div className="bg-amber-50 rounded-xl print:rounded-lg p-3 print:p-2.5 border border-amber-200">
                                      <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wider mb-2">Ihr echter Ertrag (Auszahlungsphase)</div>
                                      <div className="space-y-1 mb-2">
@@ -2205,12 +2065,8 @@ export default function App() {
                                      <div className="flex justify-between items-end border-t border-amber-200 pt-2">
                                          <div className="text-xs font-bold text-amber-900">Echtes Netto {item.isKapital ? 'Kapital' : '(Mtl.)'}:</div>
                                          <div className="text-right">
-                                             <div className="text-sm font-black text-amber-600">
-                                                 {formatCurrency(item.isKapital ? item.echteNettoKapital : item.echteNettoRente)}
-                                             </div>
-                                             {!item.isKapital && (
-                                                 <div className="text-[11px] text-amber-700/80 font-medium">Gesamt in Rente: {formatCurrency(item.summeNettoAuszahlung)}</div>
-                                             )}
+                                             <div className="text-sm font-black text-amber-600">{formatCurrency(item.isKapital ? item.echteNettoKapital : item.echteNettoRente)}</div>
+                                             {!item.isKapital && <div className="text-[11px] text-amber-700/80 font-medium">Gesamt in Rente: {formatCurrency(item.summeNettoAuszahlung)}</div>}
                                          </div>
                                      </div>
                                  </div>
@@ -2242,7 +2098,10 @@ export default function App() {
                                              <span className="text-sm font-bold text-slate-600">Amortisation</span>
                                              <span className="text-xl print:text-lg font-black text-slate-800">{item.amortisationsJahre.toFixed(1)} Jahre</span>
                                          </div>
-                                         <div className="text-xs print:text-[11px] text-slate-500 leading-tight">Nach {item.amortisationsJahre.toFixed(1)} Jahren Rentenbezug haben Sie Ihre Netto-Gesamteinzahlung von <strong className="text-slate-700">{formatCurrency(item.summeNettoEinzahlung)}</strong> komplett wieder zurückerhalten.</div>
+                                         <div className="text-xs print:text-[11px] text-slate-500 leading-tight">
+                                             Nach {item.amortisationsJahre.toFixed(1)} Jahren {item.cType === 'etf' ? 'Entnahme' : 'Rentenbezug'} haben Sie Ihre Netto-Gesamteinzahlung komplett wieder zurückerhalten. 
+                                             {item.cType === 'etf' && <span className="block mt-1 italic">Tipp: Durch Rendite in der Entnahmephase arbeitet Ihr Restkapital weiter für Sie.</span>}
+                                         </div>
                                      </div>
                                  ) : (
                                      <div className="pt-5 print:pt-4 border-t border-slate-100">
@@ -2274,7 +2133,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* PRINT ONLY: STEUER- & ABGABEN-EXKURS */}
       {printExplanationMode !== 'none' && (
         <div className="hidden print:block max-w-6xl mx-auto p-6 mt-8 break-before-page text-slate-800">
           <h2 className="text-2xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-6 text-indigo-900">Exkurs: Steuerliche & Rechtliche Grundlagen</h2>
@@ -2309,13 +2167,11 @@ export default function App() {
                         <li>In 30 Jahren (2056): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 30))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 30))} Verheiratet)</span></li>
                         <li>In 40 Jahren (2066): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 40))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 40))} Verheiratet)</span></li>
                      </ul>
-                     <p className="text-xs text-indigo-800 bg-indigo-50 p-2 rounded mt-3">Diese dynamische Anpassung ist in der Steuer-Engine dieser Auswertung vollständig integriert und schützt Ihre zukünftige Kaufkraft in der Berechnung vor unrealistischen Steuerlasten.</p>
                   </div>
 
                   <div className="break-inside-avoid mb-6">
                      <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">2. Ehegattensplitting</h3>
                      <p className="mb-4">Das deutsche Steuerrecht erlaubt für zusammen veranlagte Ehepaare das Splittingverfahren. Dabei werden die steuerpflichtigen Einkünfte beider Partner (nach Abzug aller Freibeträge) in einen Topf geworfen, addiert und anschließend halbiert. Auf diese eine Hälfte wird der Einkommensteuertarif angewendet. Die daraus resultierende Steuer wird am Ende verdoppelt.</p>
-                     <p className="mb-2"><strong>Der mathematische Hebel:</strong> Dieser Mechanismus ist in der Altersvorsorge enorm wertvoll, wenn ein Partner eine deutlich höhere Rente bezieht als der andere (z. B. durch Erziehungszeiten oder Teilzeit). Durch das fiktive "Teilen" des Einkommens wird die harte Steuerprogression des Besserverdienenden massiv abgemildert.</p>
                      <div className={`p-2 rounded text-xs font-bold border mt-3 ${isMarried ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
                          Status für diese Auswertung: {isMarried ? 'Splitting-Verfahren für Ehepaare ist AKTIVIERT.' : 'Grundtarif für Einzelveranlagung (Single) ist AKTIVIERT.'}
                      </div>
@@ -2345,9 +2201,7 @@ export default function App() {
                </>
             )}
           </div>
-          <div className="mt-8 text-[10px] text-slate-400 text-center border-t border-slate-200 pt-4 font-semibold uppercase tracking-wider">
-              Hinweis: Alle Berechnungen in diesem Dokument sind softwaregestützte Simulationen und ersetzen keine rechtsverbindliche Steuerberatung. Stand der Steuergesetzgebung: 2026.
-          </div>
+          <div className="mt-8 text-[10px] text-slate-400 text-center border-t border-slate-200 pt-4 font-semibold uppercase tracking-wider">Hinweis: Alle Berechnungen in diesem Dokument sind softwaregestützte Simulationen und ersetzen keine rechtsverbindliche Steuerberatung. Stand der Steuergesetzgebung: 2026.</div>
         </div>
       )}
 
