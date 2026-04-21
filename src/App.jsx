@@ -4,7 +4,7 @@ import {
   CheckCircle, ChevronDown, ChevronUp, ShieldAlert, PiggyBank, 
   Briefcase, PlusCircle, Trash, Users, User, Info, Coins, Clock, Infinity as InfinityIcon, Wallet, Activity,
   LineChart as LineChartIcon, List, Download, Home, Save, FolderOpen, Zap,
-  Eye, Compass, Target, Search, Percent, SearchCheck, ArrowRight
+  Eye, Compass, Target, Search, Percent, SearchCheck, ArrowRight, Landmark
 } from 'lucide-react';
 
 // Helper für Input-Zahlen
@@ -23,6 +23,32 @@ const calculateESt = (zve, isMarried) => {
   else tax = 0.45 * x - 18307.73;
 
   return isMarried ? tax * 2 : tax;
+};
+
+// --- BEAMTEN-BESOLDUNG (Approximation 2025/2026 Basis) ---
+const besoldungsgruppen = ['A7', 'A8', 'A9', 'A10', 'A11', 'A12', 'A13', 'A14', 'A15', 'A16', 'B1', 'B2', 'B3'];
+const besoldungsLaender = { 
+  'Bund': 1.05, 'Baden-Württemberg': 1.04, 'Bayern': 1.05, 'Berlin': 0.98, 'Brandenburg': 0.99, 
+  'Bremen': 1.0, 'Hamburg': 1.03, 'Hessen': 1.04, 'Mecklenburg-Vorpommern': 0.98, 'Niedersachsen': 1.0, 
+  'Nordrhein-Westfalen': 1.0, 'Rheinland-Pfalz': 1.01, 'Saarland': 0.99, 'Sachsen': 1.02, 
+  'Sachsen-Anhalt': 0.99, 'Schleswig-Holstein': 1.0, 'Thüringen': 0.99 
+};
+
+const getBesoldung = (gruppe, stufe, land, isMarried, hasChildren) => {
+  const baseData = {
+    'A7': { b: 2700, s: 90 }, 'A8': { b: 2900, s: 100 }, 'A9': { b: 3200, s: 110 },
+    'A10': { b: 3400, s: 130 }, 'A11': { b: 3800, s: 140 }, 'A12': { b: 4100, s: 160 },
+    'A13': { b: 4700, s: 180 }, 'A14': { b: 4900, s: 210 }, 'A15': { b: 5800, s: 250 },
+    'A16': { b: 6400, s: 280 }, 'B1': { b: 7200, s: 0 }, 'B2': { b: 8500, s: 0 }, 'B3': { b: 9000, s: 0 }
+  };
+  const d = baseData[gruppe] || baseData['A13'];
+  let salary = d.b + (Math.max(1, stufe) - 1) * d.s;
+  salary *= (besoldungsLaender[land] || 1.0);
+  
+  // Familienzuschlag Approximation
+  if (isMarried) salary += 150;
+  if (hasChildren) salary += 300; 
+  return salary;
 };
 
 // --- Ertragsanteils-Tabelle ---
@@ -91,20 +117,33 @@ export default function App() {
   const [nameA, setNameA] = useState('');
   const [nameB, setNameB] = useState('');
 
-  // --- NEU: Zentrales Gehalts-Modul ---
+  // --- Gehalts-Modul ---
   const [salaryInputMode, setSalaryInputMode] = useState('netto');
   const [salaryInputValue, setSalaryInputValue] = useState(2500);
   const [salaryMultiplier, setSalaryMultiplier] = useState(12);
+  
+  // --- Beamten-Modul States ---
+  const [besoldungLand, setBesoldungLand] = useState('Bund');
+  const [besoldungGruppe, setBesoldungGruppe] = useState('A13');
+  const [besoldungStufe, setBesoldungStufe] = useState(4);
 
   const [wageGrowthRate, setWageGrowthRate] = useState(2.0);
 
   const [birthDateA, setBirthDateA] = useState('01.01.1995');
   const [retDateA, setRetDateA] = useState('01.01.2062');
+  const [pensionTypeA, setPensionTypeA] = useState('grv'); 
   const [grvGrossA, setGrvGrossA] = useState(0);
+  const [pensionEndGruppeA, setPensionEndGruppeA] = useState('A14');
+  const [pensionEndStufeA, setPensionEndStufeA] = useState(8);
+  const [pensionSatzA, setPensionSatzA] = useState(71.75);
   
   const [birthDateB, setBirthDateB] = useState('01.01.1991');
   const [retDateB, setRetDateB] = useState('01.01.2058');
+  const [pensionTypeB, setPensionTypeB] = useState('grv');
   const [grvGrossB, setGrvGrossB] = useState(0);
+  const [pensionEndGruppeB, setPensionEndGruppeB] = useState('A13');
+  const [pensionEndStufeB, setPensionEndStufeB] = useState(8);
+  const [pensionSatzB, setPensionSatzB] = useState(71.75);
 
   const [grvIncreaseRate, setGrvIncreaseRate] = useState(0);
   const [inflationRate, setInflationRate] = useState(2.0);
@@ -128,7 +167,6 @@ export default function App() {
   // --- VERTRAGS-TÜV STATES ---
   const [tuevItems, setTuevItems] = useState([]);
 
-  // ... (TÜV Helper Functions bleiben identisch)
   const addTuevItem = (contractId) => {
       const c = contracts.find(x => x.id === parseInt(contractId));
       if (!c) return;
@@ -225,8 +263,9 @@ export default function App() {
   const handleExport = () => {
     const data = { 
       nameA, nameB, isMarried, targetIncomeToday, hasChurchTax, hasChildren, kvStatus, pkvPremium, 
-      salaryInputMode, salaryInputValue, salaryMultiplier, wageGrowthRate, 
-      birthDateA, retDateA, grvGrossA, birthDateB, retDateB, grvGrossB, 
+      salaryInputMode, salaryInputValue, salaryMultiplier, besoldungLand, besoldungGruppe, besoldungStufe, wageGrowthRate, 
+      birthDateA, retDateA, grvGrossA, pensionTypeA, pensionEndGruppeA, pensionEndStufeA, pensionSatzA,
+      birthDateB, retDateB, grvGrossB, pensionTypeB, pensionEndGruppeB, pensionEndStufeB, pensionSatzB,
       grvIncreaseRate, inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic, contracts, 
       planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet, tuevItems
     };
@@ -248,17 +287,6 @@ export default function App() {
     reader.onload = (event) => {
       try {
         const data = JSON.parse(event.target.result);
-        const currentYear = new Date().getFullYear();
-        const convertToNewFormat = (str) => {
-            if (!str) return '';
-            if (str.includes('.')) return str;
-            if (str.includes('-')) {
-                const [y, m] = str.split('-');
-                return `01.${m.padStart(2, '0')}.${y}`;
-            }
-            return str;
-        };
-
         if (data.nameA !== undefined) setNameA(data.nameA);
         if (data.nameB !== undefined) setNameB(data.nameB);
         if (data.birthDateA) setBirthDateA(data.birthDateA);
@@ -269,21 +297,29 @@ export default function App() {
         if (data.targetIncomeToday) setTargetIncomeToday(data.targetIncomeToday);
         if (data.hasChurchTax !== undefined) setHasChurchTax(data.hasChurchTax); 
         
-        // --- Gehalts-Import Kompatibilität ---
         if (data.salaryInputMode) setSalaryInputMode(data.salaryInputMode);
         if (data.salaryInputValue) setSalaryInputValue(data.salaryInputValue);
         if (data.salaryMultiplier) setSalaryMultiplier(data.salaryMultiplier);
-        if (data.currentNetIncome && !data.salaryInputValue) {
-            setSalaryInputMode('netto');
-            setSalaryInputValue(data.currentNetIncome);
-            setSalaryMultiplier(12);
-        }
+        if (data.besoldungLand) setBesoldungLand(data.besoldungLand);
+        if (data.besoldungGruppe) setBesoldungGruppe(data.besoldungGruppe);
+        if (data.besoldungStufe) setBesoldungStufe(data.besoldungStufe);
 
         if (data.wageGrowthRate !== undefined) setWageGrowthRate(data.wageGrowthRate);
         if (data.hasChildren !== undefined) setHasChildren(data.hasChildren);
         if (data.contracts) setContracts(data.contracts);
+        
+        if (data.pensionTypeA) setPensionTypeA(data.pensionTypeA);
+        if (data.pensionEndGruppeA) setPensionEndGruppeA(data.pensionEndGruppeA);
+        if (data.pensionEndStufeA) setPensionEndStufeA(data.pensionEndStufeA);
+        if (data.pensionSatzA !== undefined) setPensionSatzA(data.pensionSatzA);
         if (data.grvGrossA !== undefined) setGrvGrossA(data.grvGrossA);
+        
+        if (data.pensionTypeB) setPensionTypeB(data.pensionTypeB);
+        if (data.pensionEndGruppeB) setPensionEndGruppeB(data.pensionEndGruppeB);
+        if (data.pensionEndStufeB) setPensionEndStufeB(data.pensionEndStufeB);
+        if (data.pensionSatzB !== undefined) setPensionSatzB(data.pensionSatzB);
         if (data.grvGrossB !== undefined) setGrvGrossB(data.grvGrossB);
+
         if (data.grvIncreaseRate !== undefined) setGrvIncreaseRate(data.grvIncreaseRate);
         if (data.inflationRate) setInflationRate(data.inflationRate);
         if (data.taxIndexRate !== undefined) setTaxIndexRate(data.taxIndexRate); 
@@ -329,18 +365,40 @@ export default function App() {
     let avgMonthlyGross = 0;
     let zvEToday = 0;
 
-    if (salaryInputMode === 'brutto') {
-        annualGross = (salaryInputValue || 0) * (salaryMultiplier || 12);
+    if (salaryInputMode === 'besoldung') {
+        const monthlyGross = getBesoldung(besoldungGruppe, besoldungStufe, besoldungLand, isMarried, hasChildren);
+        avgMonthlyGross = monthlyGross;
+        annualGross = monthlyGross * 12;
         
-        // SV Berechnung (Approx 2026 Limits)
+        // Beamte: 0% RV/AV. KV/PV oft PKV oder freiwillig GKV
+        let sv_kvpv = 0;
+        if (kvStatus === 'pkv') sv_kvpv = (pkvPremium || 0) * 12;
+        else if (kvStatus === 'freiwillig' || kvStatus === 'kvdr') {
+             const BBG_KV = 5812.50 * 12;
+             const kvpvRate = 0.146 + (hasChildren ? 0.034 : 0.04) + 0.016; // Voller Satz für Beamte in GKV (ohne Beihilfe-Tarif in GKV)
+             sv_kvpv = Math.min(annualGross, BBG_KV) * kvpvRate;
+        }
+        const sv_rvav = 0; 
+        
+        const totalSv = sv_kvpv + sv_rvav;
+        const werbungskosten = 1230; 
+        zvEToday = Math.max(0, annualGross - werbungskosten - totalSv);
+        
+        const tax = calculateESt(zvEToday, isMarried);
+        const kist = hasChurchTax ? tax * 0.08 : 0;
+        
+        annualNet = annualGross - totalSv - tax - kist;
+        avgMonthlyNet = annualNet / 12;
+
+    } else if (salaryInputMode === 'brutto') {
+        annualGross = (salaryInputValue || 0) * (salaryMultiplier || 12);
         const BBG_KV = 5812.50 * 12; 
         const BBG_RV = 7550.00 * 12; 
         
         let sv_kvpv = 0;
-        if (kvStatus === 'pkv') {
-            sv_kvpv = (pkvPremium || 0) * 12;
-        } else {
-            const kvpvRate = 0.073 + (hasChildren ? 0.017 : 0.022) + 0.008; // Arbeitnehmeranteil
+        if (kvStatus === 'pkv') sv_kvpv = (pkvPremium || 0) * 12;
+        else {
+            const kvpvRate = 0.073 + (hasChildren ? 0.017 : 0.022) + 0.008; 
             sv_kvpv = Math.min(annualGross, BBG_KV) * kvpvRate;
         }
         const rvavRate = 0.093 + 0.013; 
@@ -348,8 +406,6 @@ export default function App() {
         
         const totalSv = sv_kvpv + sv_rvav;
         const werbungskosten = 1230; 
-        
-        // Exaktes ZvE für Steuer Engine
         zvEToday = Math.max(0, annualGross - werbungskosten - totalSv);
         
         const tax = calculateESt(zvEToday, isMarried);
@@ -359,16 +415,29 @@ export default function App() {
         avgMonthlyNet = annualNet / 12;
         avgMonthlyGross = annualGross / 12;
     } else {
-        // Fallback: Netto-Eingabe (Rückrechnung)
         annualNet = (salaryInputValue || 0) * (salaryMultiplier || 12);
         avgMonthlyNet = annualNet / 12;
         avgMonthlyGross = isMarried ? avgMonthlyNet * 1.35 : avgMonthlyNet * 1.55;
         annualGross = avgMonthlyGross * 12;
-        zvEToday = annualGross * 0.82; // Approximation ZvE
+        zvEToday = annualGross * 0.82; 
     }
 
     return { annualGross, annualNet, avgMonthlyNet, avgMonthlyGross, zvEToday };
-  }, [salaryInputMode, salaryInputValue, salaryMultiplier, isMarried, hasChurchTax, hasChildren, kvStatus, pkvPremium]);
+  }, [salaryInputMode, salaryInputValue, salaryMultiplier, isMarried, hasChurchTax, hasChildren, kvStatus, pkvPremium, besoldungGruppe, besoldungStufe, besoldungLand]);
+
+  // Dynamische Berechnung der Pensionen, falls 'pension' ausgewählt
+  const computedPensionA = useMemo(() => {
+     if (pensionTypeA !== 'pension') return grvGrossA;
+     const finalGross = getBesoldung(pensionEndGruppeA, pensionEndStufeA, besoldungLand, isMarried, hasChildren);
+     return finalGross * (pensionSatzA / 100);
+  }, [pensionTypeA, grvGrossA, pensionEndGruppeA, pensionEndStufeA, besoldungLand, isMarried, hasChildren, pensionSatzA]);
+
+  const computedPensionB = useMemo(() => {
+     if (pensionTypeB !== 'pension') return grvGrossB;
+     const finalGross = getBesoldung(pensionEndGruppeB, pensionEndStufeB, besoldungLand, isMarried, hasChildren);
+     return finalGross * (pensionSatzB / 100);
+  }, [pensionTypeB, grvGrossB, pensionEndGruppeB, pensionEndStufeB, besoldungLand, isMarried, hasChildren, pensionSatzB]);
+
 
   // --- BERECHNUNGSLOGIK (Engine) ---
   const calculations = useMemo(() => {
@@ -387,8 +456,6 @@ export default function App() {
     
     const inflationFactor = Math.pow(1 + inflationRate / 100, maxYearsToRet);
     const targetIncomeFuture = targetIncomeToday * inflationFactor; 
-    
-    // Nutzt jetzt das präzise berechnete avgMonthlyNet
     const projectedFinalNet = currentFinancials.avgMonthlyNet * Math.pow(1 + wageGrowthRate / 100, maxYearsToRet);
     
     const getYearFromStr = (str) => {
@@ -403,6 +470,7 @@ export default function App() {
     const ertragsanteilRateA = getErtragsanteil(Math.floor(retirementAgeA));
     const ertragsanteilRateB = getErtragsanteil(Math.floor(retirementAgeB));
     
+    // GRV / Pension Besteuerung
     const taxBasePercentA = Math.min(1.0, 0.84 + (Math.max(0, retirementYearA - 2026) * 0.005));
     const taxBasePercentB = Math.min(1.0, 0.84 + (Math.max(0, retirementYearB - 2026) * 0.005));
     
@@ -415,28 +483,61 @@ export default function App() {
     const bavFreibetragKV = 197.75 * wageGrowthFactor; 
     const BBG_KV = 5812.50 * wageGrowthFactor; 
 
-    const grvFutureGrossA_raw = grvGrossA * Math.pow(1 + grvIncreaseRate / 100, yearsToRetA);
+    // Schicht 1 Basis-Werte
+    const grvFutureGrossA_raw = computedPensionA * Math.pow(1 + grvIncreaseRate / 100, yearsToRetA);
     const grvFutureGrossA = grvFutureGrossA_raw * (1 - getGrvAbschlag(retirementAgeA));
     
-    const grvFutureGrossB_raw = grvGrossB * Math.pow(1 + grvIncreaseRate / 100, yearsToRetB);
+    const grvFutureGrossB_raw = computedPensionB * Math.pow(1 + grvIncreaseRate / 100, yearsToRetB);
     const grvFutureGrossB = isMarried ? (grvFutureGrossB_raw * (1 - getGrvAbschlag(retirementAgeB))) : 0;
 
     const grvFutureGrossTotal = grvFutureGrossA + grvFutureGrossB;
 
-    const rentenFreibetragA = grvFutureGrossA * (1 - taxBasePercentA); 
-    const rentenFreibetragB = grvFutureGrossB * (1 - taxBasePercentB); 
-    let zvE_total = (grvFutureGrossA - rentenFreibetragA) + (grvFutureGrossB - rentenFreibetragB);
+    // Freibeträge berechnen (GRV = Kohorte, Pension = Versorgungsfreibetrag)
+    let rentenFreibetragA = 0;
+    if (pensionTypeA === 'pension') {
+        const yearsAfter2023 = Math.max(0, retirementYearA - 2023);
+        const vfbProzent = Math.max(0, 0.144 - (yearsAfter2023 * 0.004));
+        const vfbMax = Math.max(0, 1080 - (yearsAfter2023 * 30));
+        const vfbZuschlag = Math.max(0, 324 - (yearsAfter2023 * 9));
+        const baseFreibetrag = Math.min(grvFutureGrossA * 12 * vfbProzent, vfbMax) + vfbZuschlag;
+        rentenFreibetragA = baseFreibetrag / 12;
+    } else {
+        rentenFreibetragA = grvFutureGrossA * (1 - taxBasePercentA); 
+    }
+
+    let rentenFreibetragB = 0;
+    if (pensionTypeB === 'pension') {
+        const yearsAfter2023 = Math.max(0, retirementYearB - 2023);
+        const vfbProzent = Math.max(0, 0.144 - (yearsAfter2023 * 0.004));
+        const vfbMax = Math.max(0, 1080 - (yearsAfter2023 * 30));
+        const vfbZuschlag = Math.max(0, 324 - (yearsAfter2023 * 9));
+        const baseFreibetrag = Math.min(grvFutureGrossB * 12 * vfbProzent, vfbMax) + vfbZuschlag;
+        rentenFreibetragB = baseFreibetrag / 12;
+    } else {
+        rentenFreibetragB = grvFutureGrossB * (1 - taxBasePercentB); 
+    }
+
+    let zvE_total = Math.max(0, grvFutureGrossA - rentenFreibetragA) + Math.max(0, grvFutureGrossB - rentenFreibetragB);
 
     let deductible_kvpv = 0;
     let grvKvpv = 0;
     let remainingBBG = isMarried ? BBG_KV * 2 : BBG_KV; 
 
     if (kvStatus === 'pkv') {
-      const grvSubsidy = Math.min(grvFutureGrossTotal, remainingBBG) * kvRateHalf; 
+      // Beamten-Pension zahlt keinen KV-Zuschuss
+      let grvSubsidy = 0;
+      if (pensionTypeA === 'grv') grvSubsidy += Math.min(grvFutureGrossA, remainingBBG / (isMarried?2:1)) * kvRateHalf;
+      if (pensionTypeB === 'grv' && isMarried) grvSubsidy += Math.min(grvFutureGrossB, remainingBBG / 2) * kvRateHalf;
+
       grvKvpv = Math.max(0, pkvPremium - grvSubsidy); 
       deductible_kvpv = pkvPremium * 0.8; 
     } else if (kvStatus === 'kvdr') {
-      const grvBeitragspflichtig = Math.min(grvFutureGrossTotal, remainingBBG);
+      // KVdR Beitrag nur auf GRV, nicht auf Pension!
+      let beitragspflichtig = 0;
+      if (pensionTypeA === 'grv') beitragspflichtig += grvFutureGrossA;
+      if (pensionTypeB === 'grv' && isMarried) beitragspflichtig += grvFutureGrossB;
+
+      const grvBeitragspflichtig = Math.min(beitragspflichtig, remainingBBG);
       grvKvpv = grvBeitragspflichtig * (kvRateHalf + pvRateFull);
       deductible_kvpv += grvKvpv;
     } else if (kvStatus === 'freiwillig') {
@@ -761,15 +862,14 @@ export default function App() {
       effectivePlanerCapital, finalPlanerWithdrawal: finalPlanerWithdrawalNet, finalPlanerWithdrawalGross, planerTax, planerKist, transferredCapital
     };
   }, [
-    birthDateA, retDateA, grvGrossA, birthDateB, retDateB, grvGrossB, currentFinancials.avgMonthlyNet,
+    birthDateA, retDateA, computedPensionA, birthDateB, retDateB, computedPensionB, currentFinancials.avgMonthlyNet,
     targetIncomeToday, hasChildren, isMarried, kvStatus, pkvPremium, hasChurchTax, wageGrowthRate,
     grvIncreaseRate, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet,
-    inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic
+    inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic, pensionTypeA, pensionTypeB
   ]);
 
   // --- TÜV BERECHNUNGSLOGIK ---
   const tuevData = useMemo(() => {
-     // Exaktes errechnetes Monats-Brutto nutzen
      const estimatedGross = currentFinancials.avgMonthlyGross;
      const zvEToday = currentFinancials.zvEToday; 
      
@@ -783,7 +883,10 @@ export default function App() {
      let svNow = 0;
      let svText = "";
      
-     if (kvStatus === 'pkv') {
+     if (salaryInputMode === 'besoldung') {
+         svNow = 0; 
+         svText = "0 % (Beamte zahlen keine gesetzliche RV/AV)";
+     } else if (kvStatus === 'pkv') {
          if (estimatedGross < BBG_RV_monthly) {
              svNow = 0.106; 
              svText = "10,6 % (Nur RV/AV, PKV-versichert)";
@@ -848,7 +951,6 @@ export default function App() {
          let dynRate = 1 + (item.dynamic || 0) / 100;
          let currentGrossMonthly = item.grossMonthly;
 
-         // --- ANSPARPHASE BERECHNUNG ---
          if (cType === 'riester') {
              for (let t = 1; t <= yearsAcc; t++) {
                  let y = currentYearNum + t - 1;
@@ -985,7 +1087,7 @@ export default function App() {
      });
 
      return { marginalTaxNow, svNow, taxRetirement, estimatedGross, svText, items: evaluatedItems };
-  }, [tuevItems, contracts, currentFinancials, isMarried, calculations, kvStatus, hasChildren, hasChurchTax]);
+  }, [tuevItems, contracts, currentFinancials, isMarried, calculations, kvStatus, hasChildren, hasChurchTax, salaryInputMode]);
 
   // SVG Helper
   const formatCurrency = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(val);
@@ -994,52 +1096,87 @@ export default function App() {
   const formatYAxis = (val) => val >= 1000000 ? (val / 1000000).toFixed(1).replace('.0', '') + ' Mio.' : val >= 1000 ? (val / 1000).toFixed(0) + 'k' : val.toString();
   const renderBonVal = (val) => (<><span className="print:hidden">{formatResultCurrency(val)}</span><span className="hidden print:inline">{formatCurrency(val)} <span className="text-slate-500 font-normal">({formatCurrency(val / calculations.inflationFactor)} real)</span></span></>);
 
-  // Render Helper für das synchronisierte Gehalts-Input-Feld
   const renderSalaryInput = (context = 'top') => {
       const isTuev = context === 'tuev';
       return (
           <div className={isTuev ? "bg-white p-4 rounded-xl shadow-sm border border-slate-200" : "mb-5"}>
               <h3 className={`font-bold mb-3 ${isTuev ? 'text-sm text-slate-700 border-b border-slate-200 pb-2 flex items-center gap-2' : 'text-xs text-slate-600'}`}>
                   {isTuev && <Wallet className="w-4 h-4 text-slate-400"/>} 
-                  {isTuev ? 'Ihr Haushaltseinkommen (Heute)' : 'Heutiges Gehalt (Haushalt)'}
+                  {isTuev ? 'Ihr Einkommen (Ausgangsbasis)' : 'Heutiges Einkommen (Ausgangsbasis)'}
               </h3>
               
-              <div className={`flex ${isTuev ? 'flex-col sm:flex-row gap-3 items-end' : 'gap-2 mb-1.5'}`}>
-                  <div className={isTuev ? 'w-full sm:w-1/3' : 'w-1/3'}>
-                      {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Gehalts-Art</label>}
-                      <select value={salaryInputMode} onChange={e => setSalaryInputMode(e.target.value)} className={`w-full border rounded-lg p-2.5 text-sm font-bold outline-none shadow-sm ${isTuev ? 'border-amber-200 bg-amber-50 text-amber-900 focus:border-amber-400' : 'border-indigo-200 bg-white text-slate-700 focus:border-indigo-400'}`}>
-                          <option value="brutto">Brutto</option>
-                          <option value="netto">Netto</option>
-                      </select>
+              <div className={`flex ${isTuev ? 'flex-col sm:flex-row gap-3 items-end' : 'flex-col gap-3 mb-1.5'}`}>
+                  <div className="flex gap-2 w-full">
+                      <div className="w-1/3">
+                          {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Gehalts-Art</label>}
+                          <select value={salaryInputMode} onChange={e => setSalaryInputMode(e.target.value)} className={`w-full border rounded-lg p-2.5 text-sm font-bold outline-none shadow-sm ${isTuev ? 'border-amber-200 bg-amber-50 text-amber-900 focus:border-amber-400' : 'border-indigo-200 bg-white text-slate-700 focus:border-indigo-400'}`}>
+                              <option value="brutto">Angestellt (Brutto)</option>
+                              <option value="netto">Angestellt (Netto)</option>
+                              <option value="besoldung">Beamter (Besoldung)</option>
+                          </select>
+                      </div>
+                      
+                      {salaryInputMode !== 'besoldung' ? (
+                          <>
+                              <div className="w-1/3">
+                                  {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Betrag</label>}
+                                  <input type="number" value={salaryInputValue} onChange={e => setSalaryInputValue(parseNum(e.target.value))} placeholder="Mtl. Betrag" className={`w-full border rounded-lg p-2.5 text-sm font-bold shadow-sm outline-none ${isTuev ? 'border-amber-200 bg-white focus:border-amber-400' : 'border-indigo-200 bg-white focus:border-indigo-400'}`} />
+                              </div>
+                              <div className="w-1/3">
+                                  {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Auszahlungen / Jahr</label>}
+                                  <select value={salaryMultiplier} onChange={e => setSalaryMultiplier(Number(e.target.value))} className={`w-full border rounded-lg p-2.5 text-sm font-bold outline-none shadow-sm ${isTuev ? 'border-amber-200 bg-white text-slate-700 focus:border-amber-400' : 'border-indigo-200 bg-white text-slate-700 focus:border-indigo-400'}`}>
+                                      <option value={12}>12 Gehälter</option>
+                                      <option value={12.5}>12.5 (halbes 13.)</option>
+                                      <option value={13}>13 (+ Urlaubsgeld)</option>
+                                      <option value={14}>14 (+ Urlaub/Weihn.)</option>
+                                  </select>
+                              </div>
+                          </>
+                      ) : (
+                          <>
+                              <div className="w-1/3">
+                                  {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Besoldungsgruppe</label>}
+                                  <select value={besoldungGruppe} onChange={e => setBesoldungGruppe(e.target.value)} className={`w-full border rounded-lg p-2.5 text-sm font-bold shadow-sm outline-none ${isTuev ? 'border-amber-200 bg-white focus:border-amber-400' : 'border-indigo-200 bg-white focus:border-indigo-400'}`}>
+                                      {besoldungsgruppen.map(g => <option key={g} value={g}>{g}</option>)}
+                                  </select>
+                              </div>
+                              <div className="w-1/3">
+                                  {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Erfahrungsstufe</label>}
+                                  <select value={besoldungStufe} onChange={e => setBesoldungStufe(Number(e.target.value))} className={`w-full border rounded-lg p-2.5 text-sm font-bold shadow-sm outline-none ${isTuev ? 'border-amber-200 bg-white focus:border-amber-400' : 'border-indigo-200 bg-white focus:border-indigo-400'}`}>
+                                      {[1,2,3,4,5,6,7,8].map(s => <option key={s} value={s}>Stufe {s}</option>)}
+                                  </select>
+                              </div>
+                          </>
+                      )}
                   </div>
-                  <div className={isTuev ? 'w-full sm:w-1/3' : 'w-full'}>
-                      {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Betrag</label>}
-                      <input type="number" value={salaryInputValue} onChange={e => setSalaryInputValue(parseNum(e.target.value))} placeholder="Mtl. Betrag" className={`w-full border rounded-lg p-2.5 text-sm font-bold shadow-sm outline-none ${isTuev ? 'border-amber-200 bg-white focus:border-amber-400' : 'border-indigo-200 bg-white focus:border-indigo-400'}`} />
-                  </div>
-                  <div className={isTuev ? 'w-full sm:w-1/3' : 'w-2/3'}>
-                      {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Auszahlungen / Jahr</label>}
-                      <select value={salaryMultiplier} onChange={e => setSalaryMultiplier(Number(e.target.value))} className={`w-full border rounded-lg p-2.5 text-sm font-bold outline-none shadow-sm ${isTuev ? 'border-amber-200 bg-white text-slate-700 focus:border-amber-400' : 'border-indigo-200 bg-white text-slate-700 focus:border-indigo-400'}`}>
-                          <option value={12}>12 Gehälter</option>
-                          <option value={12.5}>12.5 (halbes 13.)</option>
-                          <option value={13}>13 (+ Urlaubsgeld)</option>
-                          <option value={14}>14 (+ Urlaub/Weihn.)</option>
-                      </select>
-                  </div>
-              </div>
-              
-              <div className={`flex justify-between items-center bg-slate-50 border border-slate-200 rounded-lg p-2 mt-3 ${isTuev ? 'shadow-sm' : ''}`}>
-                  {!isTuev ? (
-                      <>
-                          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Errechnetes Netto:</span>
-                          <span className="text-sm font-black text-indigo-600">{formatCurrency(currentFinancials.avgMonthlyNet)} / M</span>
-                      </>
-                  ) : (
-                      <>
-                          <div className="flex flex-col"><span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Basis Ø Brutto</span><span className="font-bold text-slate-700">{formatCurrency(currentFinancials.avgMonthlyGross)}</span></div>
-                          <div className="flex flex-col text-right"><span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">Basis Ø Netto</span><span className="font-bold text-indigo-600">{formatCurrency(currentFinancials.avgMonthlyNet)}</span></div>
-                      </>
+                  
+                  {salaryInputMode === 'besoldung' && (
+                      <div className="w-full">
+                          {isTuev && <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Dienstherr / Bundesland</label>}
+                          <select value={besoldungLand} onChange={e => setBesoldungLand(e.target.value)} className={`w-full border rounded-lg p-2.5 text-sm font-bold shadow-sm outline-none ${isTuev ? 'border-amber-200 bg-white focus:border-amber-400' : 'border-indigo-200 bg-white focus:border-indigo-400'}`}>
+                              {Object.keys(besoldungsLaender).map(l => <option key={l} value={l}>{l}</option>)}
+                          </select>
+                      </div>
                   )}
               </div>
+              
+              <div className={`flex justify-between items-center bg-slate-50 border border-slate-200 rounded-lg p-3 mt-3 ${isTuev ? 'shadow-sm' : ''}`}>
+                  <div className="flex flex-col">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Basis Ø Brutto</span>
+                      <span className="font-bold text-slate-700">{formatCurrency(currentFinancials.avgMonthlyGross)}</span>
+                  </div>
+                  <div className="flex flex-col items-center text-center">
+                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Jahresbrutto</span>
+                      <span className="font-black text-slate-800">{formatCurrency(currentFinancials.annualGross)}</span>
+                  </div>
+                  <div className="flex flex-col text-right">
+                      <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">Basis Ø Netto</span>
+                      <span className="font-bold text-indigo-600">{formatCurrency(currentFinancials.avgMonthlyNet)}</span>
+                  </div>
+              </div>
+              {salaryInputMode === 'besoldung' && (
+                  <div className="text-[9px] text-slate-400 mt-2 flex items-center gap-1"><Info className="w-3 h-3"/> Basis: Richtwerte Bund/Länder (inkl. pauschalem Familienzuschlag falls ausgewählt). Ohne SV-Abzug (RV/AV).</div>
+              )}
           </div>
       );
   };
@@ -1471,7 +1608,7 @@ export default function App() {
                          </div>
                          <div className="bg-white p-5 rounded-xl shadow-sm border border-indigo-100 text-center relative overflow-hidden">
                             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-400 to-indigo-600 print:hidden"></div>
-                            <p className="text-sm text-slate-600 mb-2">Ihr Gehalt steigt bis zur Rente voraussichtlich auf:</p>
+                            <p className="text-sm text-slate-600 mb-2">Ihr Gehalt steigt bis zur {salaryInputMode==='besoldung' ? 'Pension' : 'Rente'} voraussichtlich auf:</p>
                             <div className="text-2xl font-bold text-slate-800 mb-4">{formatCurrency(calculations.projectedFinalNet)}</div>
                             <div className="w-16 border-t-2 border-slate-100 mx-auto my-4"></div>
                             <p className="text-sm text-slate-600 mb-2">Haushalts-Bedarf im Jahr {calculations.baseRetYear}:</p>
@@ -1490,7 +1627,11 @@ export default function App() {
 
             <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 mb-4">
               <label className="block text-xs font-semibold text-slate-700 mb-1">Krankenversicherung im Alter (Haushalt)</label>
-              <select value={kvStatus} onChange={e => setKvStatus(e.target.value)} className="w-full border rounded p-2 text-sm mb-2"><option value="kvdr">Gesetzlich (KVdR - Pflicht)</option><option value="freiwillig">Gesetzlich (Freiwillig)</option><option value="pkv">Privat versichert (PKV)</option></select>
+              <select value={kvStatus} onChange={e => setKvStatus(e.target.value)} className="w-full border rounded p-2 text-sm mb-2">
+                 <option value="kvdr">Gesetzlich (KVdR - Pflicht)</option>
+                 <option value="freiwillig">Gesetzlich (Freiwillig)</option>
+                 <option value="pkv">Privat versichert (PKV / Beihilfe)</option>
+              </select>
               {kvStatus === 'pkv' && <input type="number" value={pkvPremium} onChange={e => setPkvPremium(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm" placeholder="Mtl. PKV-Beitrag" />}
             </div>
             
@@ -1511,31 +1652,84 @@ export default function App() {
               <div className={`${activeTab === 's1' ? 'block' : 'hidden'} print:block print:mb-8`}>
                 <h3 className="hidden print:block font-bold text-blue-900 mb-4 border-b border-blue-200 pb-1 text-lg">Eingaben: Schicht 1 (Basis)</h3>
                 <div className="space-y-4">
-                  {['A', 'B'].filter(p => p === 'A' || isMarried).map(p => (
+                  {['A', 'B'].filter(p => p === 'A' || isMarried).map(p => {
+                    const isPension = p === 'A' ? pensionTypeA === 'pension' : pensionTypeB === 'pension';
+                    const setPensionMode = (mode) => p === 'A' ? setPensionTypeA(mode) : setPensionTypeB(mode);
+
+                    return (
                     <div key={`grv-${p}`} className={`${personTab === p ? 'block' : 'hidden'} print:block print:mb-4 bg-white p-4 rounded-lg border border-blue-200 shadow-sm relative print:border-slate-300 print:shadow-none`}>
-                      <h3 className="text-sm font-bold text-blue-800 mb-3 flex items-center justify-between print:text-slate-800">
-                        <span className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 print:text-slate-500" /> Gesetzliche Rente {isMarried ? `(${p === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})` : ''}</span>
-                        <button onClick={() => estimatorPerson === p ? setEstimatorPerson(null) : openEstimator(p)} className="print:hidden text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 flex items-center gap-1 transition-colors"><Calculator className="w-3 h-3"/> {estimatorPerson === p ? 'Schließen' : 'Schätzen'}</button>
-                      </h3>
-                      {estimatorPerson === p && (
-                          <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100 shadow-inner print:hidden">
-                              <h4 className="text-[10px] font-bold text-blue-800 uppercase mb-2">Schnell-Schätzer (Karriere-Kurve)</h4>
-                              <div className="mb-3">
-                                  <label className="block text-[10px] font-semibold text-slate-600 mb-1">Heutiges Bruttojahresgehalt (€)</label>
-                                  <input type="number" value={estimatorSalary} onChange={e => setEstimatorSalary(parseNum(e.target.value))} className="w-full border border-blue-200 rounded p-2 text-sm bg-white font-mono font-bold" />
+                      <div className="flex items-center justify-between mb-4 border-b border-blue-50 pb-2">
+                        <span className="flex items-center gap-2 text-sm font-bold text-blue-800 print:text-slate-800">
+                           {isPension ? <Landmark className="w-4 h-4 print:text-slate-500"/> : <ShieldAlert className="w-4 h-4 print:text-slate-500"/>}
+                           {isPension ? 'Beamtenversorgung (Pension)' : 'Gesetzliche Rente'} {isMarried ? `(${p === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})` : ''}
+                        </span>
+                      </div>
+                      
+                      <div className="flex bg-slate-100 p-1 rounded-lg mb-4 print:hidden">
+                         <button onClick={() => setPensionMode('grv')} className={`flex-1 py-1.5 text-xs font-bold rounded ${!isPension ? 'bg-white shadow text-blue-700':'text-slate-500'}`}>Gesetzliche RV</button>
+                         <button onClick={() => setPensionMode('pension')} className={`flex-1 py-1.5 text-xs font-bold rounded ${isPension ? 'bg-white shadow text-blue-700':'text-slate-500'}`}>Pension (Beamte)</button>
+                      </div>
+
+                      {!isPension ? (
+                          <>
+                              <div className="flex justify-between mb-2">
+                                 <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Basiswerte Gesetzliche Rente</div>
+                                 <button onClick={() => estimatorPerson === p ? setEstimatorPerson(null) : openEstimator(p)} className="print:hidden text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 flex items-center gap-1 transition-colors"><Calculator className="w-3 h-3"/> {estimatorPerson === p ? 'Schließen' : 'Schätzen'}</button>
                               </div>
-                              <button onClick={() => { if (p === 'A') setGrvGrossA(estimatedPension); else setGrvGrossB(estimatedPension); setEstimatorPerson(null); }} className="w-full bg-blue-600 text-white text-xs font-bold py-2 rounded hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"><CheckCircle className="w-3.5 h-3.5" /> ca. {estimatedPension} € übernehmen</button>
+                              {estimatorPerson === p && (
+                                  <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100 shadow-inner print:hidden">
+                                      <h4 className="text-[10px] font-bold text-blue-800 uppercase mb-2">Schnell-Schätzer (Karriere-Kurve)</h4>
+                                      <div className="mb-3">
+                                          <label className="block text-[10px] font-semibold text-slate-600 mb-1">Heutiges Bruttojahresgehalt (€)</label>
+                                          <input type="number" value={estimatorSalary} onChange={e => setEstimatorSalary(parseNum(e.target.value))} className="w-full border border-blue-200 rounded p-2 text-sm bg-white font-mono font-bold" />
+                                      </div>
+                                      <button onClick={() => { if (p === 'A') setGrvGrossA(estimatedPension); else setGrvGrossB(estimatedPension); setEstimatorPerson(null); }} className="w-full bg-blue-600 text-white text-xs font-bold py-2 rounded hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"><CheckCircle className="w-3.5 h-3.5" /> ca. {estimatedPension} € übernehmen</button>
+                                  </div>
+                              )}
+                              <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-xs font-semibold text-slate-600 mb-1">Anspruch (€/M)</label><input type="number" value={p==='A'?grvGrossA:grvGrossB} onChange={e => p==='A'?setGrvGrossA(parseNum(e.target.value)):setGrvGrossB(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
+                                <div><label className="block text-xs font-semibold text-slate-600 mb-1">Rentensteigerung (%)</label><input type="number" step="0.1" value={grvIncreaseRate} onChange={e => { const val = parseNum(e.target.value); setGrvIncreaseRate(val); setTaxIndexRate(val); }} className="w-full border rounded p-2" /></div>
+                              </div>
+                          </>
+                      ) : (
+                          <div className="space-y-4 border border-blue-100 p-4 rounded-xl bg-blue-50/30 print:bg-white print:border-slate-200">
+                              <div className="text-[10px] text-blue-600 uppercase font-bold tracking-wider mb-2 flex items-center gap-1.5"><Compass className="w-3.5 h-3.5"/> Karriere-Endstufe (zur Pensionierung)</div>
+                              <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                      <label className="block text-xs font-semibold text-slate-600 mb-1">End-Besoldung</label>
+                                      <select value={p === 'A' ? pensionEndGruppeA : pensionEndGruppeB} onChange={e => p === 'A' ? setPensionEndGruppeA(e.target.value) : setPensionEndGruppeB(e.target.value)} className="w-full border rounded p-2 text-sm font-bold bg-white">
+                                          {besoldungsgruppen.map(g => <option key={g} value={g}>{g}</option>)}
+                                      </select>
+                                  </div>
+                                  <div>
+                                      <label className="block text-xs font-semibold text-slate-600 mb-1">End-Erfahrungsstufe</label>
+                                      <select value={p === 'A' ? pensionEndStufeA : pensionEndStufeB} onChange={e => p === 'A' ? setPensionEndStufeA(Number(e.target.value)) : setPensionEndStufeB(Number(e.target.value))} className="w-full border rounded p-2 text-sm font-bold bg-white">
+                                          {[1,2,3,4,5,6,7,8].map(s => <option key={s} value={s}>Stufe {s}</option>)}
+                                      </select>
+                                  </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4 items-end">
+                                  <div>
+                                      <label className="block text-xs font-semibold text-slate-600 mb-1">Erwarteter Ruhegehaltssatz</label>
+                                      <div className="relative">
+                                          <input type="number" step="0.1" max="71.75" value={p === 'A' ? pensionSatzA : pensionSatzB} onChange={e => p === 'A' ? setPensionSatzA(parseNum(e.target.value)) : setPensionSatzB(parseNum(e.target.value))} className="w-full border rounded p-2 text-sm font-bold bg-white pr-8" />
+                                          <span className="absolute right-3 top-2 text-slate-400">%</span>
+                                      </div>
+                                  </div>
+                                  <div className="bg-white p-2 border border-blue-200 rounded text-center">
+                                      <div className="text-[9px] text-slate-500 uppercase font-bold">Errechnete Brutto-Pension</div>
+                                      <div className="font-black text-blue-700 text-lg">{formatCurrency(p === 'A' ? computedPensionA : computedPensionB)}</div>
+                                  </div>
+                              </div>
+                              <div className="text-[10px] text-slate-500 italic flex items-start gap-1"><Info className="w-3 h-3 mt-0.5 shrink-0"/> Engine berücksichtigt automatisch den speziellen Versorgungsfreibetrag für Beamte anstatt der Kohortenbesteuerung.</div>
                           </div>
                       )}
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><label className="block text-xs font-semibold text-slate-600 mb-1">Anspruch (€/M)</label><input type="number" value={p==='A'?grvGrossA:grvGrossB} onChange={e => p==='A'?setGrvGrossA(parseNum(e.target.value)):setGrvGrossB(parseNum(e.target.value))} className="w-full border rounded p-2" /></div>
-                        <div><label className="block text-xs font-semibold text-slate-600 mb-1">Rentensteigerung (%)</label><input type="number" step="0.1" value={grvIncreaseRate} onChange={e => { const val = parseNum(e.target.value); setGrvIncreaseRate(val); setTaxIndexRate(val); }} className="w-full border rounded p-2" /></div>
-                      </div>
+
                       {((p==='A' ? calculations.grvDiscountA : calculations.grvDiscountB) > 0) && (
                          <div className="mt-3 text-[10px] text-rose-600 bg-rose-50 p-2 rounded flex gap-1.5 border border-rose-100"><AlertCircle className="w-3 h-3 shrink-0" /><span>Vorruhestand: Es werden automatisch {((p==='A' ? calculations.grvDiscountA : calculations.grvDiscountB)*100).toFixed(1)}% Abschlag berechnet.</span></div>
                       )}
                     </div>
-                  ))}
+                  )})}
                   {contracts.filter(c => c.layer === 1).map(renderContractInput)}
                   <button onClick={() => addContract(1)} className="w-full py-2 border-2 border-dashed border-slate-300 rounded text-slate-500 flex items-center justify-center gap-2 hover:border-blue-400 hover:text-blue-600 print:hidden"><PlusCircle className="w-4 h-4" /> Rürup hinzufügen</button>
                 </div>
@@ -1606,7 +1800,7 @@ export default function App() {
               <div className="text-3xl font-bold">{renderBonVal(calculations.targetIncomeFuture)}</div>
             </div>
             <div className={`bg-white rounded-xl shadow-sm border p-6 ${calculations.gap > 0 ? 'border-rose-200 text-rose-600' : 'border-emerald-200 text-emerald-600'}`}>
-              <h3 className="text-sm font-semibold mb-1">Rentenlücke</h3>
+              <h3 className="text-sm font-semibold mb-1">Versorgungslücke</h3>
               <div className="text-3xl font-bold">{calculations.gap > 0 ? renderBonVal(calculations.gap) : 'Gedeckt'}</div>
             </div>
           </div>
@@ -1681,13 +1875,13 @@ export default function App() {
             <div className="space-y-4">
               <div className="border border-blue-100 rounded-lg print:border-slate-300 overflow-hidden mb-3">
                 <div className="flex justify-between p-3 sm:p-4 bg-white cursor-pointer print:bg-white border-b border-blue-50" onClick={() => toggleSection('s1')}>
-                  <div className="font-bold text-sm sm:text-base text-blue-900">Schicht 1 (Basis)</div>
+                  <div className="font-bold text-sm sm:text-base text-blue-900">Schicht 1 (Basis / Pension)</div>
                   <div className="font-bold text-sm sm:text-base">{renderBonVal(calculations.s1_net)}</div>
                 </div>
                 <div className={`p-3 bg-white text-xs space-y-2 ${expandedSections.s1 ? 'block' : 'hidden'} print:block print:space-y-0 print:p-0 print:mt-2`}>
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
                     <div className="flex justify-between items-center mb-1">
-                      <div className="font-semibold text-sm text-blue-900">Gesetzliche Rente (Haushalt)</div>
+                      <div className="font-semibold text-sm text-blue-900">{pensionTypeA === 'pension' || pensionTypeB === 'pension' ? 'Rente / Pension (Haushalt)' : 'Gesetzliche Rente (Haushalt)'}</div>
                       <div className="font-bold text-base text-slate-800">{renderBonVal(calculations.grvNet)}</div>
                     </div>
                     <div className="flex justify-between items-end text-[10px] text-slate-500">
@@ -1864,7 +2058,6 @@ export default function App() {
              </div>
          </div>
          
-         {/* NEU: Integriertes & synchronisiertes Gehaltsfeld */}
          {renderSalaryInput('tuev')}
          
          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-inner">
@@ -1873,14 +2066,12 @@ export default function App() {
                 <div className="text-lg font-black text-emerald-600">{(tuevData.marginalTaxNow * 100).toFixed(1)} %</div>
                 <div className="text-[11px] text-slate-400 mt-1 leading-tight">Steuerersparnis auf genau die Euro, die in die bAV/Rürup fließen (Progressionsspitze, <strong>nicht</strong> der Durchschnittsteuersatz!).</div>
              </div>
-             {tuevData.svNow > 0 && (
-                 <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-center relative overflow-hidden">
-                    <div className="absolute right-0 top-0 bottom-0 w-1 bg-emerald-400"></div>
-                    <div className="text-[11px] text-slate-500 uppercase font-bold mb-0.5">Ihre SV-Ersparnis heute</div>
-                    <div className="text-lg font-black text-emerald-600">{(tuevData.svNow * 100).toFixed(1)} %</div>
-                    <div className="text-[11px] text-slate-500 mt-1 leading-tight">Ersparnis bei RV/AV/KV/PV. <br/><span className="text-emerald-700 font-bold">Status: {tuevData.svText}</span></div>
-                 </div>
-             )}
+             <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-center relative overflow-hidden">
+                <div className="absolute right-0 top-0 bottom-0 w-1 bg-emerald-400"></div>
+                <div className="text-[11px] text-slate-500 uppercase font-bold mb-0.5">Ihre SV-Ersparnis heute</div>
+                <div className="text-lg font-black text-emerald-600">{(tuevData.svNow * 100).toFixed(1)} %</div>
+                <div className="text-[11px] text-slate-500 mt-1 leading-tight">Ersparnis bei RV/AV/KV/PV. <br/><span className="text-emerald-700 font-bold">Status: {tuevData.svText}</span></div>
+             </div>
              <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-center">
                 <div className="text-[11px] text-slate-500 uppercase font-bold mb-0.5">Grenzsteuersatz im Rentenalter</div>
                 <div className="text-lg font-black text-rose-600">{(tuevData.taxRetirement * 100).toFixed(1)} %</div>
@@ -2019,7 +2210,7 @@ export default function App() {
                                          {item.cType === 'riester' ? (
                                              <>
                                                 <div className="flex justify-between text-[11px] text-slate-600"><span>Mtl. Eigenbeitrag (Start):</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
-                                                <div className="flex justify-between text-[11px] text-emerald-600" title="Zulagen mindern nicht den monatlichen Aufwand, sondern fließen zusätzlich in den Vertrag."><span>+ Zulagen (in Vertrag) <Info className="w-3 h-3 inline opacity-50"/>:</span> <span>+ {formatCurrency(item.snapshotZulage)}</span></div>
+                                                <div className="flex justify-between text-[11px] text-emerald-600" title="Zulagen mindern nicht den monatlichen Aufwand, sondern fließen zusätzlich in Vertrag."><span>+ Zulagen (in Vertrag) <Info className="w-3 h-3 inline opacity-50"/>:</span> <span>+ {formatCurrency(item.snapshotZulage)}</span></div>
                                                 {item.snapshotSteuerErsparnis > 0 && <div className="flex justify-between text-[11px] text-emerald-600 cursor-help" title={`Günstigerprüfung: Max. 2100€ p.a. werden mit Ihrem Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%) multipliziert. Davon werden die Zulagen abgezogen.`}><span>- Steuer-Erstattung (Start) <Info className="w-3 h-3 inline text-emerald-400"/>:</span> <span>- {formatCurrency(item.snapshotSteuerErsparnis)}</span></div>}
                                              </>
                                          ) : item.cType.includes('bav') ? (
@@ -2034,7 +2225,7 @@ export default function App() {
                                          
                                          {item.cType !== 'riester' && item.svErsparnis > 0 && <div className="flex justify-between text-[11px] text-emerald-600"><span>- SV-Ersparnis:</span> <span>- {formatCurrency(item.svErsparnis)}</span></div>}
                                          {item.cType !== 'riester' && item.cType.includes('bav') && item.svErsparnis === 0 && (
-                                             <div className="flex justify-between text-[9px] text-slate-400 italic"><span>- SV-Ersparnis:</span> <span>0 € (über BBG)</span></div>
+                                             <div className="flex justify-between text-[9px] text-slate-400 italic"><span>- SV-Ersparnis:</span> <span>0 € ({salaryInputMode === 'besoldung' ? 'Beamte' : 'über BBG'})</span></div>
                                          )}
 
                                          {item.cType !== 'riester' && item.steuerErsparnis > 0 && <div className="flex justify-between text-[11px] text-emerald-600 cursor-help" title={item.cType === 'basis' ? `Der Beitrag wird zu 100% als Sonderausgabe angesetzt und mindert Ihre Steuerlast um Ihren Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%).` : `Die Entgeltumwandlung (minus SV-Ersparnis) ist steuerfrei. Ersparnis = Betrag × Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%).`}><span>- Steuer-Ersparnis <Info className="w-3 h-3 inline text-emerald-400"/>:</span> <span>- {formatCurrency(item.steuerErsparnis)}</span></div>}
@@ -2145,12 +2336,16 @@ export default function App() {
                      <p>Diese Schicht unterliegt der <strong>nachgelagerten Kohortenbesteuerung</strong>. Der steuerpflichtige Anteil richtet sich nach dem Jahr Ihres Renteneintritts (z. B. 84 % im Jahr 2026). Die verbleibenden steuerfreien 16 % werden im ersten Rentenjahr als absoluter Euro-Betrag auf Lebenszeit eingefroren. Alle künftigen Rentenerhöhungen (Inflationsausgleich) sind somit zu 100 % steuerpflichtig. In der KVdR fallen hierauf Beiträge zur Kranken- und Pflegeversicherung an.</p>
                   </div>
                   <div className="break-inside-avoid mb-6">
+                     <h3 className="font-bold text-lg mb-1 text-slate-900">Exkurs: Die Beamtenversorgung (Pension)</h3>
+                     <p>Beamtenpensionen unterliegen <strong>nicht</strong> der Kohortenbesteuerung, sondern der Besteuerung nach § 19 EStG inkl. <strong>Versorgungsfreibetrag</strong>. Dieser Freibetrag sinkt (ähnlich dem steuerfreien Anteil der Rente) abhängig vom Jahr des Eintritts in den Ruhestand ab (im Jahr 2026 beträgt er noch ca. 12,0 % plus 270 € Zuschlag, bis maximal 1.170 € im Jahr). Zudem zahlen Beamte auch im Ruhestand keine Renten- und Arbeitslosenversicherung, sondern führen in der Regel lediglich ihre PKV-Beiträge ab.</p>
+                  </div>
+                  <div className="break-inside-avoid mb-6">
                      <h3 className="font-bold text-lg mb-1 text-slate-900">2. Schicht 2 (Betriebliche Altersvorsorge & Riester)</h3>
-                     <p>Betriebs- und Riester-Renten sind in der Auszahlungsphase <strong>voll einkommensteuerpflichtig</strong>. Bei Betriebsrenten (bAV) aus einer Entgeltumwandlung müssen gesetzlich Versicherte in der Auszahlungsphase zudem die <strong>vollen Beiträge zur Kranken- und Pflegeversicherung</strong> (Arbeitnehmer- und Arbeitgeberanteil) abführen. Dies mindert die reale Rendite von Verträgen ohne hohen Arbeitgeberzuschuss oft spürbar.</p>
+                     <p>Betriebs- und Riester-Renten sind in der Auszahlungsphase <strong>voll einkommensteuerpflichtig</strong>. Bei Betriebsrenten (bAV) aus einer Entgeltumwandlung müssen gesetzlich Versicherte in der Auszahlungsphase zudem die <strong>vollen Beiträge zur Kranken- und Pflegeversicherung</strong> (Arbeitnehmer- und Arbeitgeberanteil) abführen. Beamte oder Privatversicherte (PKV) sind von diesem gesonderten KV/PV-Abzug bei bAV oder Basisrenten ausgenommen.</p>
                   </div>
                   <div className="break-inside-avoid mb-6">
                      <h3 className="font-bold text-lg mb-1 text-slate-900">3. Schicht 3 (Private Renten, Immobilien & ETFs)</h3>
-                     <p>Diese Verträge sind im Alter steuerlich stark begünstigt. Bei einer lebenslangen privaten Rente greift die <strong>Ertragsanteilsbesteuerung</strong> (bei Renteneintritt mit 67 Jahren sind nur 17 % der Rente steuerpflichtig). Depotentnahmen unterliegen der Abgeltungsteuer (25 % zzgl. Soli), wobei Aktien-ETFs eine <strong>Teilfreistellung von 30 %</strong> (komplett steuerfrei) genießen. Zudem sind Auszahlungen aus der Schicht 3 für Pflichtversicherte in der KVdR komplett kranken- und pflegeversicherungsfrei.</p>
+                     <p>Diese Verträge sind im Alter steuerlich stark begünstigt. Bei einer lebenslangen privaten Rente greift die <strong>Ertragsanteilsbesteuerung</strong> (bei Renteneintritt mit 67 Jahren sind nur 17 % der Rente steuerpflichtig). Depotentnahmen unterliegen der Abgeltungsteuer (25 % zzgl. Soli), wobei Aktien-ETFs eine <strong>Teilfreistellung von 30 %</strong> (komplett steuerfrei) genießen.</p>
                   </div>
                </>
             ) : (
@@ -2165,37 +2360,29 @@ export default function App() {
                      <ul className="list-disc pl-5 mb-2 text-slate-700 space-y-1">
                         <li>In 20 Jahren (2046): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 20))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 20))} Verheiratet)</span></li>
                         <li>In 30 Jahren (2056): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 30))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 30))} Verheiratet)</span></li>
-                        <li>In 40 Jahren (2066): ca. <strong>{formatCurrency(12348 * Math.pow(1 + taxIndexRate / 100, 40))}</strong> <span className="text-slate-500">({formatCurrency(24696 * Math.pow(1 + taxIndexRate / 100, 40))} Verheiratet)</span></li>
                      </ul>
                   </div>
 
                   <div className="break-inside-avoid mb-6">
                      <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">2. Ehegattensplitting</h3>
                      <p className="mb-4">Das deutsche Steuerrecht erlaubt für zusammen veranlagte Ehepaare das Splittingverfahren. Dabei werden die steuerpflichtigen Einkünfte beider Partner (nach Abzug aller Freibeträge) in einen Topf geworfen, addiert und anschließend halbiert. Auf diese eine Hälfte wird der Einkommensteuertarif angewendet. Die daraus resultierende Steuer wird am Ende verdoppelt.</p>
-                     <div className={`p-2 rounded text-xs font-bold border mt-3 ${isMarried ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                         Status für diese Auswertung: {isMarried ? 'Splitting-Verfahren für Ehepaare ist AKTIVIERT.' : 'Grundtarif für Einzelveranlagung (Single) ist AKTIVIERT.'}
-                     </div>
                   </div>
 
                   <div className="break-inside-avoid mb-6">
-                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">3. Krankenversicherung der Rentner (KVdR)</h3>
-                     <p>Die KVdR ist keine eigenständige Kasse, sondern ein begehrter Versichertenstatus. Erreicht wird er über die "9/10-Regelung" (mind. 90 % der zweiten Erwerbslebenshälfte gesetzlich versichert). Der gravierende Vorteil: KVdR-Mitglieder zahlen KV/PV-Beiträge <strong>nur auf gesetzliche Renten und Betriebsrenten</strong>. Einkünfte aus Kapitalvermögen (ETFs, private Renten) oder Vermietung bleiben zu 100 % beitragsfrei.</p>
+                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">3. Beamtenpensionen vs. Rente</h3>
+                     <p className="mb-2">Die gesetzliche Rente und Basisrenten werden über die nachgelagerte <strong>Kohortenbesteuerung</strong> versteuert. Hier gibt es einen lebenslangen steuerfreien Rentenbetrag (in Euro, nicht in %). Jede spätere Rentenerhöhung wird voll besteuert.</p>
+                     <p>Beamtenpensionen unterliegen dagegen als "Einkünfte aus nichtselbstständiger Arbeit" (nach § 19 EStG) der vollen Besteuerung, abzüglich eines <strong>Versorgungsfreibetrags</strong>. Dieser Freibetrag sinkt abhängig vom Jahr des Eintritts in den Ruhestand. Für den Eintrittsjahrgang 2040+ entfällt dieser Freibetrag komplett, sodass die Pension dann voll besteuert wird. Beamte zahlen auf ihre Bezüge zudem keine Arbeitslosen- oder Rentenversicherung und sind meist in der PKV versichert (wodurch keine prozentualen KV/PV-Abzüge in der Rentenphase entstehen).</p>
                   </div>
 
                   <div className="break-inside-avoid mb-6">
-                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">4. Kohortenbesteuerung (Schicht 1)</h3>
-                     <p>Gemäß Alterseinkünftegesetz steigt die Steuerpflicht für gesetzliche Renten und Rürup-Renten sukzessive an. Wer 2026 in Rente geht, muss 84 % seiner ersten vollen Jahresrente versteuern. Die restlichen 16 % werden als <strong>absoluter Euro-Betrag auf Lebenszeit eingefroren</strong>. Die Konsequenz: Jede zukünftige gesetzliche Rentenerhöhung erhöht das zu versteuernde Einkommen unmittelbar zu 100 %.</p>
+                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">4. Krankenversicherung der Rentner (KVdR)</h3>
+                     <p>Die KVdR ist keine eigenständige Kasse, sondern ein begehrter Versichertenstatus (9/10-Regelung). Der gravierende Vorteil: KVdR-Mitglieder zahlen KV/PV-Beiträge <strong>nur auf gesetzliche Renten und Betriebsrenten</strong>. Einkünfte aus Kapitalvermögen oder Vermietung bleiben beitragsfrei. Privatversicherte (PKV) sind von dieser Regelung losgelöst und zahlen lediglich ihre individuellen PKV-Prämien.</p>
                   </div>
 
                   <div className="break-inside-avoid mb-6">
-                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">5. Betriebsrenten & Doppelverbeitragung</h3>
-                     <p>Die betriebliche Altersvorsorge (bAV) mindert in der Erwerbsphase Steuern und Sozialabgaben. Im Alter dreht sich dies um: bAV-Renten sind voll steuerpflichtig. Gravierender ist die Sozialversicherungspflicht: Rentner müssen hierauf den <strong>vollen Kranken- und Pflegeversicherungsbeitrag (ca. 19 - 20 %)</strong> abführen (abzgl. eines kleinen Freibetrags). Dies ist die sogenannte Doppelverbeitragung.</p>
-                  </div>
-
-                  <div className="break-inside-avoid mb-6">
-                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">6. Steuerprivilegien in Schicht 3</h3>
+                     <h3 className="font-bold text-lg mb-2 text-indigo-900 border-b border-indigo-100 pb-1">5. Steuerprivilegien in Schicht 3</h3>
                      <p className="mb-2"><strong>Private Leibrenten:</strong> Unterliegen nur der Ertragsanteilsbesteuerung nach § 22 EStG. Geht man mit 67 in Rente, rechnet das Finanzamt fiktiv nur ca. 17 % der Rente als steuerpflichtiges Einkommen an.</p>
-                     <p className="mb-2"><strong>Kapitalauszahlungen:</strong> Bei Laufzeiten über 12 Jahren und Auszahlung ab Alter 62 greift das <strong>Halbeinkünfteverfahren</strong>. 50 % des Gewinns sind steuerfrei, die andere Hälfte unterliegt dem persönlichen Steuersatz.</p>
+                     <p className="mb-2"><strong>Kapitalauszahlungen:</strong> Bei Laufzeiten über 12 Jahren und Auszahlung ab Alter 62 greift das <strong>Halbeinkünfteverfahren</strong>. 50 % des Gewinns sind steuerfrei.</p>
                      <p><strong>ETF-Depots:</strong> Realisierte Kursgewinne unterliegen der Abgeltungsteuer (25 % + Soli). Bei reinen Aktien-ETFs bleiben durch das Investmentsteuergesetz (Teilfreistellung) <strong>30 % aller Gewinne komplett steuerfrei</strong>.</p>
                   </div>
                </>
