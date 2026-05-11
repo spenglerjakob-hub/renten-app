@@ -936,6 +936,7 @@ export default function App() {
   }, [tuevItems, contracts, currentFinancials, isMarried, calculations, kvStatus, hasChildren, hasChurchTax, salaryInputMode]);
 
   const formatCurrency = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(val);
+  const formatCurrencyOneDec = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 1, minimumFractionDigits: 0 }).format(val);
   const formatResultCurrency = (val) => formatCurrency(showRealValue ? val / calculations.inflationFactor : val);
   const formatChartCurrency = (val, discount) => formatCurrency(showRealValue ? val / discount : val);
   const formatYAxis = (val) => val >= 1000000 ? (val / 1000000).toFixed(1).replace('.0', '') + ' Mio.' : val >= 1000 ? (val / 1000).toFixed(0) + 'k' : val.toString();
@@ -2211,59 +2212,59 @@ export default function App() {
                              {/* MIDDLE COLUMN: Einzahlung vs Auszahlung */}
                              <div className={`w-full lg:w-[32%] print:w-[32%] p-3 sm:p-5 print:p-4 flex flex-col justify-center gap-3 sm:gap-4 print:gap-3 border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-slate-100 ${item.payoutGross === 0 ? 'pt-10 sm:pt-12 print:pt-10' : ''}`}>
                                  <div className="bg-slate-50 rounded-xl print:rounded-lg p-2.5 sm:p-3 print:p-2.5 border border-slate-200">
-                                     <div className="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Ihre Belastung (Ansparphase)</div>
+                                     <div className="text-xs sm:text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">Ihre Belastung (Ansparphase)</div>
                                      <div className="space-y-1 mb-2 relative group">
                                          {item.cType === 'riester' ? (
                                              <>
-                                                <div className="flex justify-between text-[10px] sm:text-[11px] text-slate-600"><span>Mtl. Eigenbeitrag (Start):</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
-                                                <div className="flex justify-between text-[10px] sm:text-[11px] text-emerald-600" title="Zulagen mindern nicht den monatlichen Aufwand, sondern fließen zusätzlich in Vertrag."><span>+ Zulagen (in Vertrag) <Info className="w-2.5 h-2.5 sm:w-3 sm:h-3 inline opacity-50"/>:</span> <span>+ {formatCurrency(item.snapshotZulage)}</span></div>
-                                                {item.snapshotSteuerErsparnis > 0 && <div className="flex justify-between text-[10px] sm:text-[11px] text-emerald-600 cursor-help" title={`Günstigerprüfung: Max. 2100€ p.a. werden mit Ihrem Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%) multipliziert. Davon werden die Zulagen abgezogen.`}><span>- Steuererstattung (Start) <Info className="w-2.5 h-2.5 sm:w-3 sm:h-3 inline text-emerald-400"/>:</span> <span>- {formatCurrency(item.snapshotSteuerErsparnis)}</span></div>}
+                                                <div className="flex justify-between text-xs sm:text-sm text-slate-600"><span>Mtl. Eigenbeitrag (Start):</span> <span className="font-bold">{formatCurrency(item.grossMonthly)}</span></div>
+                                                <div className="flex justify-between text-xs sm:text-sm text-emerald-600" title="Zulagen mindern nicht den monatlichen Aufwand, sondern fließen zusätzlich in Vertrag."><span>+ Zulagen (in Vertrag) <Info className="w-3 h-3 inline opacity-50"/>:</span> <span className="font-bold">+ {formatCurrency(item.snapshotZulage)}</span></div>
+                                                {item.snapshotSteuerErsparnis > 0 && <div className="flex justify-between text-xs sm:text-sm text-emerald-600 cursor-help" title={`Günstigerprüfung: Max. 2100€ p.a. werden mit Ihrem Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%) multipliziert. Davon werden die Zulagen abgezogen.`}><span>- Steuererstattung (Start) <Info className="w-3 h-3 inline text-emerald-400"/>:</span> <span className="font-bold">- {formatCurrency(item.snapshotSteuerErsparnis)}</span></div>}
                                              </>
                                          ) : item.cType.includes('bav') ? (
                                              <>
-                                                 <div className="flex justify-between text-[10px] sm:text-[11px] text-slate-600"><span>Gesamtbeitrag (Start):</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
-                                                 {item.agZuschuss > 0 && <div className="flex justify-between text-[10px] sm:text-[11px] text-emerald-600"><span>- AG-Zuschuss (Start):</span> <span>- {formatCurrency(item.agZuschuss)}</span></div>}
-                                                 <div className="flex justify-between text-[10px] sm:text-[11px] font-bold text-slate-700 border-t border-slate-200 pt-1 mt-1"><span>= Entgeltumwandlung:</span> <span>{formatCurrency(item.grossMonthly - item.agZuschuss)}</span></div>
+                                                 <div className="flex justify-between text-xs sm:text-sm text-slate-600"><span>Gesamtbeitrag (Start):</span> <span className="font-bold">{formatCurrency(item.grossMonthly)}</span></div>
+                                                 {item.agZuschuss > 0 && <div className="flex justify-between text-xs sm:text-sm text-emerald-600"><span>- AG-Zuschuss (Start):</span> <span className="font-bold">- {formatCurrency(item.agZuschuss)}</span></div>}
+                                                 <div className="flex justify-between text-xs sm:text-sm font-bold text-slate-700 border-t border-slate-200 pt-1 mt-1"><span>= Entgeltumwandlung:</span> <span>{formatCurrency(item.grossMonthly - item.agZuschuss)}</span></div>
                                              </>
                                          ) : (
-                                             <div className="flex justify-between text-[10px] sm:text-[11px] text-slate-600"><span>{item.cType === 'etf' ? 'Sparrate' : 'Brutto-Beitrag'} (Start):</span> <span>{formatCurrency(item.grossMonthly)}</span></div>
+                                             <div className="flex justify-between text-xs sm:text-sm text-slate-600"><span>{item.cType === 'etf' ? 'Sparrate' : 'Brutto-Beitrag'} (Start):</span> <span className="font-bold">{formatCurrency(item.grossMonthly)}</span></div>
                                          )}
                                          
-                                         {item.cType !== 'riester' && item.svErsparnis > 0 && <div className="flex justify-between text-[10px] sm:text-[11px] text-emerald-600"><span>- SV-Ersparnis:</span> <span>- {formatCurrency(item.svErsparnis)}</span></div>}
+                                         {item.cType !== 'riester' && item.svErsparnis > 0 && <div className="flex justify-between text-xs sm:text-sm text-emerald-600"><span>- SV-Ersparnis:</span> <span className="font-bold">- {formatCurrency(item.svErsparnis)}</span></div>}
                                          {item.cType !== 'riester' && item.cType.includes('bav') && item.svErsparnis === 0 && (
-                                             <div className="flex justify-between text-[8px] sm:text-[9px] text-slate-400 italic"><span>- SV-Ersparnis:</span> <span>0 € ({salaryInputMode === 'besoldung' ? 'Beamte' : 'über BBG'})</span></div>
+                                             <div className="flex justify-between text-xs sm:text-sm text-slate-400 italic"><span>- SV-Ersparnis:</span> <span className="font-bold">0 € ({salaryInputMode === 'besoldung' ? 'Beamte' : 'über BBG'})</span></div>
                                          )}
 
-                                         {item.cType !== 'riester' && item.steuerErsparnis > 0 && <div className="flex justify-between text-[10px] sm:text-[11px] text-emerald-600 cursor-help" title={item.cType === 'basis' ? `Der Beitrag wird zu 100% als Sonderausgabe angesetzt und mindert Ihre Steuerlast um Ihren Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%).` : `Die Entgeltumwandlung (minus SV-Ersparnis) ist steuerfrei. Ersparnis = Betrag × Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%).`}><span>- Steuer-Ersparnis <Info className="w-2.5 h-2.5 sm:w-3 sm:h-3 inline text-emerald-400"/>:</span> <span>- {formatCurrency(item.steuerErsparnis)}</span></div>}
+                                         {item.cType !== 'riester' && item.steuerErsparnis > 0 && <div className="flex justify-between text-xs sm:text-sm text-emerald-600 cursor-help" title={item.cType === 'basis' ? `Der Beitrag wird zu 100% als Sonderausgabe angesetzt und mindert Ihre Steuerlast um Ihren Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%).` : `Die Entgeltumwandlung (minus SV-Ersparnis) ist steuerfrei. Ersparnis = Betrag × Grenzsteuersatz (${(tuevData.marginalTaxNow*100).toFixed(1)}%).`}><span>- Steuer-Ersparnis <Info className="w-3 h-3 inline text-emerald-400"/>:</span> <span className="font-bold">- {formatCurrency(item.steuerErsparnis)}</span></div>}
                                      </div>
                                      {item.cType === 'etf' && (selectedC.capital > 0 || selectedC.specialPayment > 0) && (
-                                         <div className="text-[8px] sm:text-[9px] text-slate-500 italic mt-1 pt-1 border-t border-slate-100 leading-tight">
+                                         <div className="text-[10px] sm:text-xs text-slate-500 italic mt-1 pt-1 border-t border-slate-100 leading-tight">
                                             zzgl. Startkapital {formatCurrency(selectedC.capital || 0)} 
                                             {selectedC.specialPayment > 0 ? ` & Einmalzahlung ${formatCurrency(selectedC.specialPayment)}` : ''}
                                          </div>
                                      )}
                                      <div className="flex justify-between items-end border-t border-slate-200 pt-1.5 sm:pt-2 mt-1.5 sm:mt-2">
-                                         <div className="text-[11px] sm:text-xs font-bold text-slate-800">Netto-Aufwand (Start):</div>
+                                         <div className="text-xs sm:text-sm font-bold text-slate-800">Netto-Aufwand (Start):</div>
                                          <div className="text-right">
                                              <div className="text-xs sm:text-sm font-black text-slate-800">{formatCurrency(item.echterNettoAufwand)} <span className="text-[9px] sm:text-[11px] font-normal text-slate-500">/ M</span></div>
-                                             <div className="text-[9px] sm:text-[11px] text-slate-500 font-medium mt-0.5">Gesamt {item.dynamic > 0 ? '(Dyn.)' : ''}: {formatCurrency(item.summeNettoEinzahlung)}</div>
+                                             <div className="text-[9px] sm:text-[11px] text-slate-500 font-medium mt-1">Gesamt {item.dynamic > 0 ? '(Dyn.)' : ''}: <br className="sm:hidden" /><span className="text-sm sm:text-base font-black text-slate-700">{formatCurrency(item.summeNettoEinzahlung)}</span></div>
                                          </div>
                                      </div>
                                  </div>
 
                                  <div className="bg-amber-50 rounded-xl print:rounded-lg p-2.5 sm:p-3 print:p-2.5 border border-amber-200">
-                                     <div className="text-[10px] sm:text-[11px] font-bold text-amber-700 uppercase tracking-wider mb-2">Ihr Ertrag (Auszahlungsphase)</div>
+                                     <div className="text-xs sm:text-sm font-bold text-amber-700 uppercase tracking-wider mb-2">Ihr Ertrag (Auszahlungsphase)</div>
                                      <div className="space-y-1 mb-2">
-                                         <div className="flex justify-between text-[10px] sm:text-[11px] text-slate-600"><span>Brutto {item.isKapital ? 'Kapital' : 'Rente'}:</span> <span className="font-bold">{formatCurrency(item.payoutGross)}</span></div>
-                                         {!item.isKapital && item.kvPvAbzug > 0 && <div className="flex justify-between text-[10px] sm:text-[11px] text-rose-500"><span>KV/PV-Abzug:</span> <span>- {formatCurrency(item.kvPvAbzug)}</span></div>}
-                                         {!item.isKapital && item.steuerAbzug > 0 && <div className="flex justify-between text-[10px] sm:text-[11px] text-rose-500"><span>Steuer-Abzug:</span> <span>- {formatCurrency(item.steuerAbzug)}</span></div>}
-                                         {item.isKapital && <div className="text-[9px] sm:text-[11px] text-rose-500 text-right italic mt-0.5">Steuern/Abgaben bereits abgezogen</div>}
+                                         <div className="flex justify-between text-xs sm:text-sm text-slate-600"><span>Brutto {item.isKapital ? 'Kapital' : 'Rente'}:</span> <span className="font-bold">{formatCurrency(item.payoutGross)}</span></div>
+                                         {!item.isKapital && item.kvPvAbzug > 0 && <div className="flex justify-between text-xs sm:text-sm text-rose-500"><span>KV/PV-Abzug:</span> <span className="font-bold">- {formatCurrency(item.kvPvAbzug)}</span></div>}
+                                         {!item.isKapital && item.steuerAbzug > 0 && <div className="flex justify-between text-xs sm:text-sm text-rose-500"><span>Steuer-Abzug:</span> <span className="font-bold">- {formatCurrency(item.steuerAbzug)}</span></div>}
+                                         {item.isKapital && <div className="text-[10px] sm:text-xs text-rose-500 text-right italic mt-0.5">Steuern/Abgaben bereits abgezogen</div>}
                                      </div>
                                      <div className="flex justify-between items-end border-t border-amber-200 pt-1.5 sm:pt-2">
-                                         <div className="text-[11px] sm:text-xs font-bold text-amber-900">Echtes Netto {item.isKapital ? 'Kapital' : '(Mtl.)'}:</div>
+                                         <div className="text-xs sm:text-sm font-bold text-amber-900">Echtes Netto {item.isKapital ? 'Kapital' : '(Mtl.)'}:</div>
                                          <div className="text-right">
-                                             <div className="text-xs sm:text-sm font-black text-amber-600">{formatCurrency(item.isKapital ? item.echteNettoKapital : item.echteNettoRente)}</div>
-                                             {!item.isKapital && <div className="text-[9px] sm:text-[11px] text-amber-700/80 font-medium">Gesamt in {item.statutoryYears} J.: {formatCurrency(item.summeNettoAuszahlung)}</div>}
+                                             <div className="text-xs sm:text-sm font-black text-amber-600">{formatCurrencyOneDec(item.isKapital ? item.echteNettoKapital : item.echteNettoRente)}</div>
+                                             {!item.isKapital && <div className="text-[9px] sm:text-[11px] text-amber-700/80 font-medium mt-1">Gesamt in {item.statutoryYears} J.: <br className="sm:hidden" /><span className="text-sm sm:text-base font-black text-amber-700">{formatCurrency(item.summeNettoAuszahlung)}</span></div>}
                                          </div>
                                      </div>
                                  </div>
@@ -2276,16 +2277,16 @@ export default function App() {
                                  <div className="space-y-3">
                                      <div className="bg-indigo-800/50 p-2 sm:p-3 rounded-lg border border-indigo-700/50 flex justify-between items-center">
                                          <div>
-                                            <div className="text-[9px] sm:text-[10px] text-indigo-300 mb-0.5">Netto-Hebel</div>
-                                            <div className="text-[8px] sm:text-[9px] text-indigo-400">Auszahlung / Einzahlung</div>
+                                            <div className="text-xs sm:text-sm font-bold uppercase tracking-wider text-indigo-300 mb-0.5">Netto-Hebel</div>
+                                            <div className="text-[10px] sm:text-[11px] text-indigo-400">Auszahlung / Einzahlung</div>
                                          </div>
                                          <div className="text-xl sm:text-2xl font-black text-white">{item.nettoHebel > 0 ? item.nettoHebel.toFixed(2) : 0}x</div>
                                      </div>
 
                                      <div className="bg-indigo-800/50 p-2 sm:p-3 rounded-lg border border-indigo-700/50 flex justify-between items-center">
                                          <div>
-                                            <div className="text-[9px] sm:text-[10px] text-indigo-300 mb-0.5">Netto-Rendite (IRR)</div>
-                                            <div className="text-[8px] sm:text-[9px] text-indigo-400">Nach Steuern & Abgaben</div>
+                                            <div className="text-xs sm:text-sm font-bold uppercase tracking-wider text-indigo-300 mb-0.5">Netto-Rendite (IRR)</div>
+                                            <div className="text-[10px] sm:text-[11px] text-indigo-400">Nach Steuern & Abgaben</div>
                                          </div>
                                          <div className={`text-xl sm:text-2xl font-black ${item.irr >= 4 ? 'text-emerald-400' : item.irr > 0 ? 'text-amber-400' : 'text-rose-400'}`}>
                                              {item.irr ? item.irr.toFixed(1) : 0} %
@@ -2295,8 +2296,8 @@ export default function App() {
                                      <div className="bg-indigo-800/50 p-2 sm:p-3 rounded-lg border border-indigo-700/50">
                                          <div className="flex justify-between items-end">
                                              <div>
-                                                 <div className="text-[9px] sm:text-[10px] text-indigo-300 mb-0.5">Echter Netto-Gewinn</div>
-                                                 <div className="text-[8px] sm:text-[9px] text-indigo-400">Gesamt-Auszahlung minus Eigenanteil</div>
+                                                 <div className="text-xs sm:text-sm font-bold uppercase tracking-wider text-indigo-300 mb-0.5">Echter Netto-Gewinn</div>
+                                                 <div className="text-[10px] sm:text-[11px] text-indigo-400">Gesamt-Auszahlung minus Eigenanteil</div>
                                              </div>
                                              <div className={`text-sm sm:text-base font-bold ${item.echterNettoGewinn > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                                  {item.echterNettoGewinn > 0 ? '+' : ''}{formatCurrency(item.echterNettoGewinn)}
