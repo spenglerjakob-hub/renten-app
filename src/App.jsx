@@ -427,7 +427,7 @@ export default function App() {
         if (c.id === id) {
             let updates = { type: newType, gross: c.gross || 0, payoutStrategy: 'rent' };
             if (newType === 'immobilie') { updates.costs = 20; updates.dynamic = 1.5; }
-            if (newType === 'etf') { updates.capital = 0; updates.monthly = 100; updates.returnAcc = 6.0; updates.returnWith = 0.0; updates.ter = 0.2; updates.duration = 25; updates.specialPayment = 0; updates.specialPaymentYear = new Date().getFullYear() + 10; updates.payoutStrategy = 'planer'; }
+            if (newType === 'etf') { updates.capital = 0; updates.monthly = 100; updates.returnAcc = 6.0; updates.returnWith = 0.0; updates.ter = 0.2; updates.issueSurcharge = 0; updates.depotFee = 0; updates.duration = 25; updates.specialPayment = 0; updates.specialPaymentYear = new Date().getFullYear() + 10; updates.payoutStrategy = 'planer'; }
             return { ...c, ...updates };
         }
         return c;
@@ -584,12 +584,26 @@ export default function App() {
       }
       else if (c.type === 'etf') {
         const r_acc = Math.max(0, (c.returnAcc || 0) - (c.ter || 0)) / 100, r_m = r_acc / 12, months = maxYearsToRet * 12;
-        let cap = (c.capital || 0) * Math.pow(1 + r_acc, maxYearsToRet) + ((c.monthly || 0) > 0 ? (r_m > 0 ? (c.monthly || 0) * ((Math.pow(1 + r_m, months) - 1) / r_m) : (c.monthly || 0) * months) : 0);
-        if (c.specialPayment > 0 && c.specialPaymentYear > currentYear) cap += c.specialPayment * Math.pow(1 + r_acc, Math.max(0, baseRetYear - c.specialPaymentYear));
+        const issueSurchargeRate = (c.issueSurcharge || 0) / 100;
+        const effMonthly = (c.monthly || 0) * (1 - issueSurchargeRate);
+        const effSpecial = (c.specialPayment || 0) * (1 - issueSurchargeRate);
+
+        let cap = (c.capital || 0) * Math.pow(1 + r_acc, maxYearsToRet) + (effMonthly > 0 ? (r_m > 0 ? effMonthly * ((Math.pow(1 + r_m, months) - 1) / r_m) : effMonthly * months) : 0);
+        if (c.specialPayment > 0 && c.specialPaymentYear > currentYear) cap += effSpecial * Math.pow(1 + r_acc, Math.max(0, baseRetYear - c.specialPaymentYear));
+        
+        const depotFee = c.depotFee || 0;
+        if (depotFee > 0 && maxYearsToRet > 0) {
+            const feeFV = r_acc > 0 ? depotFee * ((Math.pow(1 + r_acc, maxYearsToRet) - 1) / r_acc) : depotFee * maxYearsToRet;
+            cap -= feeFV;
+        }
+        cap = Math.max(0, cap);
         c.totalCap = cap;
 
         const dur = c.duration !== undefined ? c.duration : 25, r_w = Math.max(0, (c.returnWith || 0) - (c.ter || 0)) / 100;
-        c.grossMonthly = dur > 0 ? (r_w === 0 ? cap / (dur * 12) : (cap * (r_w / (1 - Math.pow(1 + r_w, -dur)))) / 12) : 0;
+        let rawGrossMonthly = dur > 0 ? (r_w === 0 ? cap / (dur * 12) : (cap * (r_w / (1 - Math.pow(1 + r_w, -dur)))) / 12) : 0;
+        if (dur > 0 && depotFee > 0) rawGrossMonthly -= (depotFee / 12);
+        c.grossMonthly = Math.max(0, rawGrossMonthly);
+
         if (kvStatus === 'freiwillig') incomeForKV = c.grossMonthly;
       }
 
@@ -898,7 +912,10 @@ export default function App() {
              if (selectedC.type === 'etf') summeNettoEinzahlung = (selectedC.capital || 0) + ((selectedC.specialPaymentYear <= cRetYear) ? (selectedC.specialPayment || 0) : 0);
              for (let t = 1; t <= yearsAcc; t++) {
                  let flow = currentGrossMonthly * 12;
-                 if (selectedC.type === 'etf' && selectedC.specialPayment > 0 && (currentYearNum + t - 1) === selectedC.specialPaymentYear) flow += selectedC.specialPayment;
+                 if (selectedC.type === 'etf') {
+                     if (selectedC.specialPayment > 0 && (currentYearNum + t - 1) === selectedC.specialPaymentYear) flow += selectedC.specialPayment;
+                     flow += (selectedC.depotFee || 0);
+                 }
                  summeNettoEinzahlung += flow; yearlyNetFlows.push(flow);
                  if (t === 1) echterNettoAufwand = currentGrossMonthly;
                  currentGrossMonthly *= dynRate;
@@ -1122,11 +1139,15 @@ export default function App() {
                    </div>
                )}
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Rend. Ansp.</label><input type="number" step="0.1" value={c.returnAcc ?? 6} onChange={e => updateContract(c.id, 'returnAcc', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
-              <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Rend. Entn.</label><input type="number" step="0.1" value={c.returnWith ?? 2} onChange={e => updateContract(c.id, 'returnWith', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
+            <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-3">
               <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">TER (%)</label><input type="number" step="0.1" value={c.ter ?? 0.2} onChange={e => updateContract(c.id, 'ter', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
-              <div><label className="block text-[9px] sm:text-[10px] font-bold text-indigo-600 mb-1">Dauer Entn.</label><input type="number" step="1" value={c.duration ?? 25} onChange={e => updateContract(c.id, 'duration', parseNum(e.target.value))} className="w-full border-2 border-indigo-300 rounded p-1.5 sm:p-2 text-xs font-bold" /></div>
+              <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1" title="Ausgabeaufschlag">Ausgabeauf. (%)</label><input type="number" step="0.1" value={c.issueSurcharge ?? 0} onChange={e => updateContract(c.id, 'issueSurcharge', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
+              <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Depotgeb. (€/J)</label><input type="number" step="1" value={c.depotFee ?? 0} onChange={e => updateContract(c.id, 'depotFee', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-3 pt-3 border-t border-slate-100">
+              <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Rend. Ansp. (%)</label><input type="number" step="0.1" value={c.returnAcc ?? 6} onChange={e => updateContract(c.id, 'returnAcc', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
+              <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Rend. Entn. (%)</label><input type="number" step="0.1" value={c.returnWith ?? 2} onChange={e => updateContract(c.id, 'returnWith', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
+              <div><label className="block text-[9px] sm:text-[10px] font-bold text-indigo-600 mb-1">Dauer Entn. (J)</label><input type="number" step="1" value={c.duration ?? 25} onChange={e => updateContract(c.id, 'duration', parseNum(e.target.value))} className="w-full border-2 border-indigo-300 rounded p-1.5 sm:p-2 text-xs font-bold" /></div>
             </div>
             <div className="mt-3 pt-3 border-t border-slate-100">
               <label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1.5 uppercase">Auszahlungs-Strategie</label>
