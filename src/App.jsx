@@ -723,7 +723,7 @@ export default function App() {
                   rKvpv = Math.min(rGross, Math.max(0, simRemainingBBG)) * (kvRateFull + pvRateFull);
               }
           }
-          rTax = rZve * avgTaxRate; 
+          rTax = Math.max(0, (calculateESt(zvE_yearly_today + ((rZve * 12) / taxInflationFactor), isMarried) - tax_today) * taxInflationFactor / 12);
           rKist = rTax * kistRate;
           nRente = Math.max(0, rGross - rTax - rKist - rKvpv);
 
@@ -951,6 +951,35 @@ export default function App() {
 
      return { marginalTaxNow, svNow, taxRetirement: calculations.marginalTaxRate, estimatedGross: currentFinancials.avgMonthlyGross, svText, items: evaluatedItems };
   }, [tuevItems, contracts, currentFinancials, isMarried, calculations, kvStatus, hasChildren, hasChurchTax, salaryInputMode]);
+
+  const planerTableData = useMemo(() => {
+        if (calculations.effectivePlanerCapital <= 0 || planerDuration <= 0) return [];
+        const data = [];
+        let currentCap = calculations.effectivePlanerCapital;
+        let currentW = calculations.finalPlanerWithdrawalGross * 12;
+        const r = planerReturn / 100;
+        const d = planerDynamic / 100;
+
+        for (let i = 1; i <= planerDuration; i++) {
+            let interest = currentCap * r;
+            let endCap = currentCap + interest - currentW;
+            
+            if (i === planerDuration || endCap < 0) endCap = 0;
+
+            data.push({
+                year: i,
+                age: Math.floor(calculations.retirementAgeA) + i - 1,
+                startCapital: currentCap,
+                withdrawal: currentW,
+                interest: interest,
+                endCapital: endCap
+            });
+
+            currentCap = endCap;
+            currentW *= (1 + d);
+        }
+        return data;
+  }, [calculations.effectivePlanerCapital, calculations.finalPlanerWithdrawalGross, planerDuration, planerReturn, planerDynamic, calculations.retirementAgeA]);
 
   const formatCurrency = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(val);
   const formatCurrencyOneDec = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 1, minimumFractionDigits: 0 }).format(val);
@@ -1848,6 +1877,7 @@ export default function App() {
           <div className="flex bg-slate-200/50 p-1 rounded border print:hidden">
             <button onClick={() => setRightView('zusammensetzung')} className={`flex-1 py-1.5 sm:py-2 rounded text-[11px] sm:text-xs font-bold flex justify-center items-center gap-1.5 sm:gap-2 ${rightView === 'zusammensetzung' ? 'bg-white shadow' : 'text-slate-500'}`}><List className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Kassenbon</button>
             <button onClick={() => setRightView('verlauf')} className={`flex-1 py-1.5 sm:py-2 rounded text-[11px] sm:text-xs font-bold flex justify-center items-center gap-1.5 sm:gap-2 ${rightView === 'verlauf' ? 'bg-white shadow' : 'text-slate-500'}`}><LineChartIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Verlauf</button>
+            <button onClick={() => setRightView('planer')} className={`flex-1 py-1.5 sm:py-2 rounded text-[11px] sm:text-xs font-bold flex justify-center items-center gap-1.5 sm:gap-2 ${rightView === 'planer' ? 'bg-white shadow' : 'text-slate-500'}`}><InfinityIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Entnahmeplan</button>
           </div>
 
           <div className={`bg-white rounded-xl shadow-sm border p-4 sm:p-6 print:block print:break-inside-avoid ${rightView === 'zusammensetzung' ? 'block' : 'hidden'}`}>
@@ -1995,6 +2025,51 @@ export default function App() {
                <div className="hidden sm:block w-px h-6 bg-slate-300 mx-1"></div>
                <button onClick={() => setManualChartStart(null)} className="w-full sm:w-auto justify-center text-[11px] sm:text-xs flex items-center gap-1.5 bg-white border border-slate-300 text-slate-600 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-100 hover:text-indigo-600 transition-all shadow-sm" title="Zurück zum Renteneintritt springen"><Clock className="w-3.5 h-3.5" /> Fokus Rente</button>
             </div>
+          </div>
+
+          <div className={`bg-white rounded-xl border p-4 sm:p-6 h-auto print:block print:mt-8 print:break-inside-avoid ${rightView === 'planer' ? 'block' : 'hidden'}`}>
+             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 sm:gap-0 mb-4 sm:mb-6">
+                <h2 className="text-xs sm:text-sm font-bold text-slate-800">Entnahmeplan (Kapitalverzehr)</h2>
+                <div className="text-[10px] sm:text-xs text-slate-500 font-medium">Laufzeit: <strong className="text-indigo-600">{planerDuration} Jahre</strong></div>
+             </div>
+             
+             {planerTableData.length > 0 ? (
+                 <div className="overflow-x-auto hide-scrollbar rounded-xl border border-slate-200">
+                     <table className="w-full text-left text-[10px] sm:text-xs whitespace-nowrap">
+                         <thead>
+                             <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 uppercase tracking-wider">
+                                 <th className="p-3 font-bold">Jahr / Alter</th>
+                                 <th className="p-3 font-bold">Kapital Beginn</th>
+                                 <th className="p-3 font-bold text-emerald-600 text-right">+ Zinsen ({planerReturn}%)</th>
+                                 <th className="p-3 font-bold text-rose-600 text-right">- Entnahme (Brutto)</th>
+                                 <th className="p-3 font-bold text-right">Kapital Ende</th>
+                             </tr>
+                         </thead>
+                         <tbody className="text-slate-700">
+                             {planerTableData.map((row, idx) => (
+                                 <tr key={row.year} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${idx === planerTableData.length - 1 ? 'border-b-0' : ''}`}>
+                                     <td className="p-3 font-medium text-slate-700 border-r border-slate-100">Jahr {row.year} <span className="text-[9px] text-slate-400 ml-1">(Alter {row.age})</span></td>
+                                     <td className="p-3">{formatResultCurrency(row.startCapital)}</td>
+                                     <td className="p-3 text-emerald-600 text-right">+{formatResultCurrency(row.interest)}</td>
+                                     <td className="p-3 text-rose-600 font-bold text-right">-{formatResultCurrency(row.withdrawal)}</td>
+                                     <td className="p-3 font-bold text-right border-l border-slate-100 bg-slate-50/50">{formatResultCurrency(row.endCapital)}</td>
+                                 </tr>
+                             ))}
+                         </tbody>
+                     </table>
+                 </div>
+             ) : (
+                 <div className="text-center p-8 text-slate-500 text-xs sm:text-sm bg-slate-50 rounded-xl border border-slate-200 border-dashed">
+                     Kein Kapital im Planer vorhanden oder Dauer ist 0.
+                 </div>
+             )}
+             
+             {planerTableData.length > 0 && (
+                 <div className="mt-4 p-3 bg-indigo-50/50 rounded-lg border border-indigo-100 text-[10px] sm:text-xs text-indigo-900 leading-relaxed">
+                     <strong className="block mb-1">So lesen Sie diese Tabelle:</strong>
+                     Das Kapital zu Beginn jedes Jahres wird mit {planerReturn}% verzinst. Gleichzeitig wird Ihre Wunschrente (inkl. {planerDynamic}% jährlicher Dynamik) entnommen. Am Ende der Laufzeit ({planerDuration} Jahre) ist das Kapital planmäßig vollständig verzehrt.
+                 </div>
+             )}
           </div>
 
           <div className="bg-slate-900 rounded-xl border border-slate-800 text-white print:bg-white print:text-slate-800 print:border-slate-300 print:break-inside-avoid overflow-hidden">
