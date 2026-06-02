@@ -308,14 +308,12 @@ export default function App() {
       setTuevItems([...tuevItems, {
           id: Date.now(),
           contractId: contractId,
-          grossMonthly: Number(contract.monthlyPremium) || Number(contract.monthly) || Number(contract.gross) || 100,
-          singlePremium: Number(contract.singlePremium) || 0,
-          isSinglePremium: !!contract.isSinglePremium,
+          grossMonthly: Number(contract.monthly) || Number(contract.gross) || 100,
           dynamic: Number(contract.dynamic) || 0,
           subsidyBav: 0,
           subsidyRiester: 175,
           children: [],
-          startDate: contract.startYear ? `01.01.${contract.startYear}` : `01.01.${new Date().getFullYear()}`,
+          startDate: `01.01.${new Date().getFullYear()}`,
           lifeExpectancy: 85
       }]);
   };
@@ -655,7 +653,7 @@ export default function App() {
         if (strategy === 'planer') transferredCapital += c.netCapital; else if (strategy === 'rent') { net = (c.netCapital * ((c.withdrawalRate || 4) / 100)) / 12; s2_net += net; }
       }
       else if (c.type === 'prvKapital') {
-        let totalPremiums = c.singlePremium || 0, currPremium = (c.monthlyPremium || 0) * 12;
+        let totalPremiums = 0, currPremium = (c.monthlyPremium || 0) * 12;
         for (let i = 0; i < Math.max(0, c.cRetYear - (c.startYear || 2010)); i++) { totalPremiums += currPremium; currPremium *= (1 + (c.dynamic || 0) / 100); }
         const profit = Math.max(0, c.gross - totalPremiums);
         
@@ -720,7 +718,29 @@ export default function App() {
                   rKvpv = Math.min(rGross, Math.max(0, simRemainingBBG)) * (kvRateFull + pvRateFull);
               }
           } else if (c.type === 'prvRente' || c.type === 'prvKapital') {
-              let totalPremiums = c.singlePremium || 0, currPremium = (c.monthlyPremium || 0) * 12;
+              rZve = rGross * cErtRate;
+              if (kvStatus === 'freiwillig') {
+                  rKvpv = Math.min(rGross, Math.max(0, simRemainingBBG)) * (kvRateFull + pvRateFull);
+              }
+          }
+          rTax = rZve * avgTaxRate; 
+          rKist = rTax * kistRate;
+          nRente = Math.max(0, rGross - rTax - rKist - rKvpv);
+
+          let cTax = 0, cKist = 0, cKvpv = 0;
+          if (c.type === 'bav' || c.type === 'bavKapital' || c.type === 'bavUkasse') {
+              const mGross = cGross / 120;
+              if (kvStatus === 'kvdr') {
+                  cKvpv = (Math.max(0, mGross - bavFreibetragKV) * kvRateFull + (mGross > bavFreibetragKV ? mGross * pvRateFull : 0)) * 120;
+              } else if (kvStatus === 'freiwillig') {
+                  cKvpv = Math.min(mGross, Math.max(0, simRemainingBBG)) * (kvRateFull + pvRateFull) * 120;
+              }
+              if (!c.isOldContract || c.type === 'bavUkasse') {
+                  cTax = ((calculateESt(zvE_yearly_today + (cGross / taxInflationFactor / 5), isMarried) - tax_today) * 5) * taxInflationFactor;
+                  cKist = cTax * kistRate;
+              }
+          } else if (c.type === 'prvRente' || c.type === 'prvKapital') {
+              let totalPremiums = 0, currPremium = (c.monthlyPremium || 0) * 12;
               for (let i = 0; i < Math.max(0, c.cRetYear - (c.startYear || 2010)); i++) { totalPremiums += currPremium; currPremium *= (1 + (c.dynamic || 0) / 100); }
               const estimatedProfit = Math.max(0, cGross - totalPremiums);
 
@@ -785,53 +805,39 @@ export default function App() {
           const r_a = Math.pow(1 + r_m, 12) - 1, C = (Math.pow(1 + r_m, 12) - 1) / r_m; 
           requiredSavings = Math.abs(r_a - dyn) < 0.00001 ? requiredCapital / (C * maxYearsToRet * Math.pow(1 + r_a, maxYearsToRet - 1)) : requiredCapital / (C * ((Math.pow(1 + r_a, maxYearsToRet) - Math.pow(1 + dyn, maxYearsToRet)) / (r_a - dyn)));
         }
+      } else requiredSavings = dyn === 0 ? requiredCapital / (maxYearsToRet * 12) : requiredCapital / (12 * ((Math.pow(1 + dyn, maxYearsToRet) - 1) / dyn));
+    }
+
+    const incomeChartData = [];
+    const etfNets = finalizedContracts.filter(c => c.type === 'etf' && (c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')) === 'rent');
+
+    for (let y = currentYear; y <= currentYear + Math.max(50, 105 - Math.floor(currentAgeA)); y++) {
+      const yearsFromNow = Math.max(0, y - currentYear);
+      const discount = Math.pow(1 + inflationRate / 100, yearsFromNow);
+      const target = targetIncomeToday * Math.pow(1 + inflationRate / 100, yearsFromNow);
+
+      if (y < baseRetYear) {
+        incomeChartData.push({ age: Math.floor(currentAgeA + yearsFromNow), year: y, isRetirement: false, totalNet: currentFinancials.avgMonthlyNet * Math.pow(1 + wageGrowthRate / 100, yearsFromNow), target, discount, planer: 0 });
       } else {
-        requiredSavings = requiredCapital / (maxYearsToRet * 12);
+        const yearsInRet = y - baseRetYear;
+        let s3_net_chart = s3_net - (includePlanerInNet ? finalPlanerWithdrawalNet : 0);
+        etfNets.forEach(c => { if (yearsInRet >= (c.duration !== undefined ? c.duration : 25)) s3_net_chart -= c.net; });
+        const currentPlanerNet = (includePlanerInNet && yearsInRet < planerDuration) ? finalPlanerWithdrawalNet * Math.pow(1 + planerDynamic / 100, yearsInRet) : 0;
+        
+        incomeChartData.push({ age: Math.floor(currentAgeA + yearsFromNow), year: y, isRetirement: true, totalNet: grvNet * Math.pow(1 + grvIncreaseRate / 100, yearsInRet) + (s1_net - grvNet) + s2_net + s3_net_chart + currentPlanerNet, target, discount, planer: currentPlanerNet });
       }
     }
 
-    let incomeChartData = [];
-    const etfNets = finalizedContracts.filter(c => c.type === 'etf' && (c.payoutStrategy === 'rent' || !c.payoutStrategy));
-
-    for (let y = currentYear; y <= baseRetYear + 40; y++) {
-        const yearsFromNow = y - currentYear;
-        const discount = Math.pow(1 + inflationRate / 100, yearsFromNow);
-        const target = targetIncomeToday * Math.pow(1 + inflationRate / 100, Math.max(yearsFromNow, maxYearsToRet));
-
-        if (y < baseRetYear) {
-          incomeChartData.push({ age: Math.floor(currentAgeA + yearsFromNow), year: y, isRetirement: false, totalNet: currentFinancials.avgMonthlyNet * Math.pow(1 + wageGrowthRate / 100, yearsFromNow), target, discount, planer: 0 });
-        } else {
-          let netThisYear = totalNetFuture;
-          let planerPortion = includePlanerInNet ? finalPlanerWithdrawalNet : 0;
-          
-          if (y >= baseRetYear + planerDuration && includePlanerInNet) {
-              netThisYear -= planerPortion;
-              planerPortion = 0;
-          }
-          etfNets.forEach(c => {
-              if (y >= (c.cRetYear || baseRetYear) + (c.duration !== undefined ? c.duration : 25)) {
-                  netThisYear -= c.net;
-              }
-          });
-
-          incomeChartData.push({ age: Math.floor(currentAgeA + yearsFromNow), year: y, isRetirement: true, totalNet: netThisYear, target, discount, planer: planerPortion });
-        }
-    }
-
     return {
-      currentAgeA, currentAgeB, retirementAgeA, retirementAgeB, yearsToRetA, yearsToRetB, maxYearsToRet, baseRetYear,
-      inflationFactor, targetIncomeFuture, projectedFinalNet,
-              grvFutureGrossA, grvFutureGrossB, grvFutureGrossTotal, 
-              grvDiscountA: getGrvAbschlag(retirementAgeA), 
-              grvDiscountB: getGrvAbschlag(retirementAgeB),
-              vfbA, vfbB, zvE_yearly: zvE_yearly_nominal, deductible_kvpv, avgTaxRate, marginalTaxRate: marginalTaxToday,
-              grvKvpv, grvESt, grvKist, grvNet,
-              contracts: finalizedContracts,
-              s1_net, s2_net, s3_net, transferredCapital,
-              effectivePlanerCapital, finalPlanerWithdrawalGross, finalPlanerWithdrawalNet, finalPlanerWithdrawal: finalPlanerWithdrawalNet, planerTax, planerKist,
-              totalNetFuture, gap, requiredCapital, requiredSavings,
-              incomeChartData
-            };
+      currentAgeA, currentAgeB, retirementAgeA, retirementAgeB, ertragsanteilRateA, ertragsanteilRateB,
+      yearsToRetA, yearsToRetB, maxYearsToRet, targetIncomeFuture, baseRetYear, inflationFactor, incomeChartData, 
+      zvE_yearly: zvE_yearly_nominal, avgTaxRate, marginalTaxRate: marginalTaxToday, deductible_kvpv, 
+      grvFutureGrossTotal, grvNet, grvKvpv, grvESt, grvKist, s1_net, s2_net, s3_net, contracts: finalizedContracts,
+      totalNetFuture, gap, requiredCapital, requiredSavings, lumpSumRequired: requiredCapital > 0 ? requiredCapital / Math.pow(1 + (Math.max(0, solutionSavingsReturn)/100), maxYearsToRet) : 0,
+      grvDiscountA: getGrvAbschlag(retirementAgeA), grvDiscountB: getGrvAbschlag(retirementAgeB), projectedFinalNet,
+      effectivePlanerCapital, finalPlanerWithdrawal: finalPlanerWithdrawalNet, finalPlanerWithdrawalGross, planerTax, planerKist, transferredCapital,
+      retirementYearA, retirementYearB, vfbA, vfbB
+    };
   }, [ birthDateA, retDateA, computedPensionA, birthDateB, retDateB, computedPensionB, currentFinancials.avgMonthlyNet, targetIncomeToday, hasChildren, isMarried, kvStatus, pkvPremium, hasChurchTax, wageGrowthRate, grvIncreaseRate, contracts, planerCapital, planerDuration, planerReturn, planerDynamic, includePlanerInNet, inflationRate, taxIndexRate, solutionSavingsReturn, solutionSavingsDynamic, pensionTypeA, pensionTypeB ]);
 
   const tuevData = useMemo(() => {
@@ -868,8 +874,7 @@ export default function App() {
          const activeStatutoryYears = (selectedC.type === 'etf' && strategy === 'rent') ? (selectedC.duration || 25) : statutoryYears;
 
          let agZuschuss = 0, steuerErsparnis = 0, svErsparnis = 0, echterNettoAufwand = 0, summeNettoEinzahlung = 0, yearlyNetFlows = [], snapshotZulage = 0, snapshotSteuerErsparnis = 0;
-         let currentGrossMonthly = item.isSinglePremium ? 0 : item.grossMonthly, dynRate = 1 + (item.dynamic || 0) / 100;
-         let singlePremium = item.isSinglePremium ? (item.singlePremium || 0) : 0;
+         let currentGrossMonthly = item.grossMonthly, dynRate = 1 + (item.dynamic || 0) / 100;
 
          if (selectedC.type === 'riester') {
              for (let t = 1; t <= yearsAcc; t++) {
@@ -877,10 +882,8 @@ export default function App() {
                  let steuerErsparnisJahr = Math.max(0, Math.min(currentGrossMonthly * 12 + zulageJahr, 2100) * marginalTaxNow - zulageJahr);
                  let valToSave = Math.max(0, (currentGrossMonthly * 12) - steuerErsparnisJahr);
                  
-                 if (t === 1) valToSave += singlePremium;
-                 
                  summeNettoEinzahlung += valToSave; yearlyNetFlows.push(valToSave);
-                 if (t === 1) { snapshotZulage = zulageJahr / 12; snapshotSteuerErsparnis = steuerErsparnisJahr / 12; echterNettoAufwand = currentGrossMonthly - (steuerErsparnisJahr / 12); }
+                 if (t === 1) { snapshotZulage = zulageJahr / 12; snapshotSteuerErsparnis = steuerErsparnisJahr / 12; echterNettoAufwand = valToSave / 12; }
                  currentGrossMonthly *= dynRate;
              }
          } 
@@ -892,10 +895,7 @@ export default function App() {
                  let currSteuerErsparnis = Math.max(0, (anBrutto - currSvErsparnis) * marginalTaxNow);
                  let currNettoAufwand = Math.max(0, anBrutto - currSteuerErsparnis - currSvErsparnis);
                  
-                 let flow = currNettoAufwand * 12;
-                 if (t === 1) flow += singlePremium;
-                 
-                 summeNettoEinzahlung += flow; yearlyNetFlows.push(flow);
+                 summeNettoEinzahlung += currNettoAufwand * 12; yearlyNetFlows.push(currNettoAufwand * 12);
                  if (t === 1) { agZuschuss = currAgZuschuss; svErsparnis = currSvErsparnis; steuerErsparnis = currSteuerErsparnis; echterNettoAufwand = currNettoAufwand; }
                  currentGrossMonthly *= dynRate;
              }
@@ -903,11 +903,7 @@ export default function App() {
          else if (selectedC.type === 'basis') {
              for (let t = 1; t <= yearsAcc; t++) {
                  let currNettoAufwand = Math.max(0, currentGrossMonthly - (currentGrossMonthly * marginalTaxNow));
-                 
-                 let flow = currNettoAufwand * 12;
-                 if (t === 1) flow += singlePremium - (singlePremium * marginalTaxNow); 
-                 
-                 summeNettoEinzahlung += flow; yearlyNetFlows.push(flow);
+                 summeNettoEinzahlung += currNettoAufwand * 12; yearlyNetFlows.push(currNettoAufwand * 12);
                  if (t === 1) { steuerErsparnis = currentGrossMonthly * marginalTaxNow; echterNettoAufwand = currNettoAufwand; }
                  currentGrossMonthly *= dynRate;
              }
@@ -916,8 +912,6 @@ export default function App() {
              if (selectedC.type === 'etf') summeNettoEinzahlung = (selectedC.capital || 0) + ((selectedC.specialPaymentYear <= cRetYear) ? (selectedC.specialPayment || 0) : 0);
              for (let t = 1; t <= yearsAcc; t++) {
                  let flow = currentGrossMonthly * 12;
-                 if (t === 1 && selectedC.type !== 'etf') flow += singlePremium;
-                 
                  if (selectedC.type === 'etf') {
                      if (selectedC.specialPayment > 0 && (currentYearNum + t - 1) === selectedC.specialPaymentYear) flow += selectedC.specialPayment;
                      flow += (selectedC.depotFee || 0);
@@ -957,35 +951,6 @@ export default function App() {
 
      return { marginalTaxNow, svNow, taxRetirement: calculations.marginalTaxRate, estimatedGross: currentFinancials.avgMonthlyGross, svText, items: evaluatedItems };
   }, [tuevItems, contracts, currentFinancials, isMarried, calculations, kvStatus, hasChildren, hasChurchTax, salaryInputMode]);
-
-  const planerTableData = useMemo(() => {
-        if (calculations.effectivePlanerCapital <= 0 || planerDuration <= 0) return [];
-        const data = [];
-        let currentCap = calculations.effectivePlanerCapital;
-        let currentW = calculations.finalPlanerWithdrawalGross * 12;
-        const r = planerReturn / 100;
-        const d = planerDynamic / 100;
-
-        for (let i = 1; i <= planerDuration; i++) {
-            let interest = currentCap * r;
-            let endCap = currentCap + interest - currentW;
-            
-            if (i === planerDuration || endCap < 0) endCap = 0;
-
-            data.push({
-                year: i,
-                age: Math.floor(calculations.retirementAgeA) + i - 1,
-                startCapital: currentCap,
-                withdrawal: currentW,
-                interest: interest,
-                endCapital: endCap
-            });
-
-            currentCap = endCap;
-            currentW *= (1 + d);
-        }
-        return data;
-  }, [calculations.effectivePlanerCapital, calculations.finalPlanerWithdrawalGross, planerDuration, planerReturn, planerDynamic, calculations.retirementAgeA]);
 
   const formatCurrency = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(val);
   const formatCurrencyOneDec = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 1, minimumFractionDigits: 0 }).format(val);
@@ -1117,7 +1082,7 @@ export default function App() {
             <span className="text-[10px] sm:text-xs font-bold text-slate-700 uppercase tracking-wide">{typeLabels[c.type] || c.type}</span>
             <span className="hidden sm:inline text-slate-300">|</span>
             <span className="text-[11px] sm:text-xs text-slate-500 font-medium truncate max-w-[120px] sm:max-w-none">{c.name || 'Neuer Vertrag'}</span>
-            {isMarried && <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded sm:ml-1 font-bold uppercase tracking-wider w-max ${c.owner === 'B' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>{c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')}</span>}
+            {isMarried && <span className="text-[8px] sm:text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded sm:ml-1 font-bold uppercase tracking-wider w-max">{c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')}</span>}
           </div>
         </div>
         <button onClick={(e) => { e.stopPropagation(); removeContract(c.id); }} className="text-slate-300 hover:text-rose-500 p-1.5 transition-colors rounded-md hover:bg-rose-50"><Trash className="w-3.5 h-3.5 sm:w-4 sm:h-4" /></button>
@@ -1195,41 +1160,27 @@ export default function App() {
           </div>
         )}
 
-        {(c.type === 'prvKapital' || c.type === 'bavKapital' || c.type === 'prvRente') && (
+        {(c.type === 'prvKapital' || c.type === 'bavKapital') && (
           <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
-            {(c.type === 'prvKapital' || c.type === 'prvRente') && (
-              <>
-                <div className="flex items-center gap-2 mb-2">
-                    <input type="checkbox" checked={!!c.isSinglePremium} onChange={e => updateContract(c.id, 'isSinglePremium', e.target.checked)} className="rounded text-indigo-600 w-3 h-3 sm:w-3.5 sm:h-3.5 cursor-pointer" id={`csingle-${c.id}`} />
-                    <label htmlFor={`csingle-${c.id}`} className="text-[10px] sm:text-[11px] text-slate-600 font-bold uppercase cursor-pointer">Einmalbeitrags-Produkt</label>
-                </div>
-                <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                  <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Beginn (J)</label><input type="number" value={c.startYear ?? ''} onChange={e => updateContract(c.id, 'startYear', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
-                  {c.isSinglePremium ? (
-                     <div className="col-span-2"><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Einmalbeitrag (€)</label><input type="number" value={c.singlePremium ?? ''} onChange={e => updateContract(c.id, 'singlePremium', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
-                  ) : (
-                     <>
-                        <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Beitrag mtl. (€)</label><input type="number" value={c.monthlyPremium ?? ''} onChange={e => updateContract(c.id, 'monthlyPremium', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
-                        <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Dyn. (%)</label><input type="number" step="0.1" value={c.dynamic ?? ''} onChange={e => updateContract(c.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
-                     </>
-                  )}
-                </div>
-              </>
+            {c.type === 'prvKapital' && (
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Beginn (J)</label><input type="number" value={c.startYear ?? ''} onChange={e => updateContract(c.id, 'startYear', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
+                <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Beitrag (€)</label><input type="number" value={c.monthlyPremium ?? ''} onChange={e => updateContract(c.id, 'monthlyPremium', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
+                <div><label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1">Dyn. (%)</label><input type="number" step="0.1" value={c.dynamic ?? ''} onChange={e => updateContract(c.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-xs" /></div>
+              </div>
             )}
-            
-            {(c.type === 'prvKapital' || c.type === 'bavKapital') && (
-                <div className="mt-1">
-                  <label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1.5 uppercase">Auszahlungs-Strategie</label>
-                  <select value={c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')} onChange={e => updateContract(c.id, 'payoutStrategy', e.target.value)} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-[11px] sm:text-xs bg-white font-medium text-slate-700">
-                     <option value="rent">In mtl. Rente umwandeln (ins Netto)</option>
-                     <option value="planer">Netto-Kapital in den Planer übertragen</option>
-                     <option value="ignore">Ignorieren (Nur Netto-Kapital anzeigen)</option>
-                  </select>
-                </div>
-            )}
+            <div className="mt-1">
+              <label className="block text-[9px] sm:text-[10px] font-semibold text-slate-500 mb-1.5 uppercase">Auszahlungs-Strategie</label>
+              <select value={c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent')} onChange={e => updateContract(c.id, 'payoutStrategy', e.target.value)} className="w-full border border-slate-200 rounded p-1.5 sm:p-2 text-[11px] sm:text-xs bg-white font-medium text-slate-700">
+                 <option value="rent">In mtl. Rente umwandeln (ins Netto)</option>
+                 <option value="planer">Netto-Kapital in den Planer übertragen</option>
+                 <option value="ignore">Ignorieren (Nur Netto-Kapital anzeigen)</option>
+              </select>
+            </div>
           </div>
         )}
 
+        {/* Trennung von isOldContract (gilt nicht für bavUkasse) und compareMode (gilt für alle Rente/Kapital Verträge) */}
         {(c.type === 'bav' || c.type === 'bavKapital' || c.type === 'prvRente' || c.type === 'prvKapital') && (
           <div className="mt-3 pt-3 border-t border-slate-100">
              <div className="flex items-start sm:items-center gap-2 mb-2">
@@ -1299,11 +1250,7 @@ export default function App() {
     return (
       <div key={c.id} className="bg-slate-50 p-2.5 sm:p-3 rounded-lg border border-slate-100 mb-2 break-inside-avoid">
         <div className="flex justify-between items-center mb-1 gap-2">
-          <div className="font-semibold text-[11px] sm:text-sm text-blue-900 truncate">
-            {c.name} 
-            {isMarried ? <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[8px] uppercase tracking-wider font-bold ${c.owner === 'B' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>{c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')}</span> : ''} 
-            {altvertragBadge}
-          </div>
+          <div className="font-semibold text-[11px] sm:text-sm text-blue-900 truncate">{c.name} {isMarried ? `(${c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})` : ''} {altvertragBadge}</div>
           <div className={`font-bold text-xs sm:text-base whitespace-nowrap ${strategy !== 'rent' ? 'text-slate-400' : 'text-slate-800'}`}>{strategy !== 'rent' ? '0 €' : renderBonVal(c.net || 0)}</div>
         </div>
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end text-[9px] sm:text-[10px] text-slate-500 gap-1 sm:gap-0">
@@ -1417,196 +1364,52 @@ export default function App() {
 
       <main className="max-w-6xl mx-auto p-2 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8 print:px-6 print:py-0 print:block">
         
-        {/* MANAGEMENT SUMMARY (PRINT ONLY) */}
-        <div className="hidden print:block mb-8 print:break-after-page">
-            <h2 className="text-2xl font-bold uppercase tracking-widest border-b-4 border-slate-800 pb-2 mb-6 text-slate-800">Management Summary</h2>
-            
-            <div className="flex gap-8 items-center bg-slate-50 p-6 rounded-2xl border border-slate-200 mb-8">
-                <div className="flex flex-col gap-2 shrink-0 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                    <div className={`w-10 h-10 rounded-full border-4 ${calculations.gap <= 0 ? 'bg-emerald-500 border-emerald-200 shadow-[0_0_15px_rgba(16,185,129,0.5)]' : 'bg-slate-100 border-slate-50'}`} style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></div>
-                    <div className={`w-10 h-10 rounded-full border-4 ${calculations.gap > 0 && calculations.gap < 300 ? 'bg-amber-400 border-amber-200 shadow-[0_0_15px_rgba(251,191,36,0.5)]' : 'bg-slate-100 border-slate-50'}`} style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></div>
-                    <div className={`w-10 h-10 rounded-full border-4 ${calculations.gap >= 300 ? 'bg-rose-500 border-rose-200 shadow-[0_0_15px_rgba(244,63,94,0.5)]' : 'bg-slate-100 border-slate-50'}`} style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></div>
-                </div>
-                <div>
-                    <h3 className="text-xl font-bold text-slate-800 mb-2">Ihr Status Quo:</h3>
-                    <p className="text-lg text-slate-600 leading-relaxed">
-                        Um Ihren Wunsch von <strong className="text-indigo-600">{formatResultCurrency(calculations.targetIncomeFuture)}</strong> netto im Alter zu halten, 
-                        {calculations.gap > 0 ? (
-                            <> fehlen Ihnen aktuell noch <strong className="text-rose-600">{formatResultCurrency(calculations.gap)}</strong> pro Monat. 
-                            Wenn Sie ab heute monatlich <strong className="text-slate-800">{formatCurrency(calculations.requiredSavings)}</strong> (bei {solutionSavingsReturn} % Rendite) anlegen, schließen Sie diese Lücke vollständig.</>
-                        ) : (
-                            <> haben Sie Ihr Ziel bereits erreicht! Ihr voraussichtliches Einkommen liegt bei <strong className="text-emerald-600">{formatResultCurrency(calculations.totalNetFuture)}</strong>.</>
-                        )}
-                    </p>
-                </div>
-            </div>
-
-            {isMarried && (
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-8 break-inside-avoid">
-                    <h3 className="font-bold text-slate-800 mb-2 text-lg">Einkommensverteilung im Haushalt (Brutto-Ansprüche)</h3>
-                    <p className="text-sm text-slate-500 mb-6">Ein starkes Einkommensgefälle kann beim Versterben eines Partners zu finanziellen Engpässen führen (da die gesetzliche Witwenrente den Bedarf oft nicht deckt).</p>
-                    
-                    {(() => {
-                        const grossA = calculations.grvFutureGrossA + calculations.contracts.filter(c => c.owner !== 'B').reduce((sum, c) => sum + (Number(c.gross) || (c.totalCap ? (c.totalCap/300) : 0)), 0);
-                        const grossB = calculations.grvFutureGrossB + calculations.contracts.filter(c => c.owner === 'B').reduce((sum, c) => sum + (Number(c.gross) || (c.totalCap ? (c.totalCap/300) : 0)), 0);
-                        const totalGross = grossA + grossB || 1;
-                        const pctA = (grossA / totalGross) * 100;
-                        const pctB = (grossB / totalGross) * 100;
-                        
-                        return (
-                            <div>
-                                <div className="flex justify-between text-sm font-bold mb-2">
-                                    <span className="text-blue-700">{nameA || 'Person A'}: {pctA.toFixed(0)}%</span>
-                                    <span className="text-emerald-700">{nameB || 'Person B'}: {pctB.toFixed(0)}%</span>
-                                </div>
-                                <div className="h-8 w-full rounded-full flex overflow-hidden border border-slate-200 shadow-inner" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}>
-                                    <div style={{ width: `${pctA}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-blue-500"></div>
-                                    <div style={{ width: `${pctB}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-emerald-500"></div>
-                                </div>
-                                <div className="flex justify-between text-xs text-slate-500 mt-2">
-                                    <span>ca. {formatResultCurrency(grossA)} / Monat</span>
-                                    <span>ca. {formatResultCurrency(grossB)} / Monat</span>
-                                </div>
-                            </div>
-                        )
-                    })()}
-                    <div className="mt-6 bg-slate-50 p-4 rounded-xl text-sm text-slate-600 border border-slate-100 flex gap-3 items-start">
-                        <Info className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" />
-                        <div><strong className="text-slate-800">Gut zu wissen (Ehegattensplitting):</strong> Das deutsche Steuerrecht ist für verheiratete Paare im Rentenalter oft sehr vorteilhaft. Die Einkünfte beider Partner werden für die Steuer addiert und halbiert. Dieser Rechner berücksichtigt den Splitting-Vorteil bereits vollautomatisch in Ihrem Haushalts-Netto!</div>
-                    </div>
-                </div>
-            )}
-        </div>
-
         {/* PRINT ONLY: ZUSAMMENFASSUNG */}
         <div className="hidden print:block mb-8 print:break-after-page">
            <h2 className="text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-6 text-slate-800">1. Ihre Eingabedaten & Prämissen</h2>
-           
-           <div className="grid grid-cols-2 gap-8 mb-6">
-               <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm break-inside-avoid">
-                  <h3 className="font-bold text-slate-800 mb-3 border-b border-slate-100 pb-2">Ausgangslage</h3>
-                  <div className="space-y-1.5 text-sm">
-                     <div className="flex justify-between"><span className="text-slate-500">Heutiges Einkommen:</span> <span className="font-bold">{formatCurrency(currentFinancials.avgMonthlyGross)} / M</span></div>
-                     <div className="flex justify-between"><span className="text-slate-500">Wunsch-Zielnetto:</span> <span className="font-bold text-indigo-600">{formatCurrency(targetIncomeToday)} / M</span></div>
-                     <div className="flex justify-between"><span className="text-slate-500">Krankenversicherung:</span> <span className="font-bold">{kvStatus === 'pkv' ? 'PKV' : kvStatus === 'freiwillig' ? 'GKV (Freiwillig)' : 'KVdR (Pflicht)'}</span></div>
-                     <div className="flex justify-between"><span className="text-slate-500">Kirchensteuer:</span> <span className="font-bold">{hasChurchTax ? 'Ja (8%)' : 'Nein'}</span></div>
-                  </div>
-               </div>
-               
-               <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm break-inside-avoid">
-                  <h3 className="font-bold text-slate-800 mb-3 border-b border-slate-100 pb-2">Wirtschaftliche Annahmen</h3>
-                  <div className="space-y-1.5 text-sm">
-                     <div className="flex justify-between"><span className="text-slate-500">Inflation (Kaufkraftverlust):</span> <span className="font-bold">{inflationRate} % p.a.</span></div>
-                     <div className="flex justify-between"><span className="text-slate-500">Renten-/Pensions-Trend:</span> <span className="font-bold">{grvIncreaseRate} % p.a.</span></div>
-                     <div className="flex justify-between"><span className="text-slate-500">Steuer-Indexierung (Wachstum):</span> <span className="font-bold">{taxIndexRate} % p.a.</span></div>
-                     <div className="flex justify-between"><span className="text-slate-500">Lücke schließen (Zinsannahme):</span> <span className="font-bold">{solutionSavingsReturn} % p.a.</span></div>
-                  </div>
-               </div>
+           <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-6 mb-6">
+              <div className="grid grid-cols-3 gap-y-6 gap-x-8 text-sm">
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Alter heute</span> <span className="font-bold text-lg text-slate-800">{Math.floor(calculations.currentAgeA)} Jahre {isMarried ? <span className="text-slate-400 text-sm font-normal">/ {Math.floor(calculations.currentAgeB)} J.</span> : ''}</span></div>
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Renteneintritt</span> <span className="font-bold text-lg text-slate-800">{Math.floor(calculations.retirementAgeA)} Jahre <span className="text-slate-400 text-sm font-normal">({calculations.baseRetYear})</span></span></div>
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider mb-1">Zielbedarf (Netto)</span> <span className="font-black text-xl text-indigo-600">{formatCurrency(targetIncomeToday)} <span className="text-xs font-normal text-slate-500">Kaufkraft heute</span></span></div>
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Steuer-Status</span> <span className="font-bold text-base text-slate-800">{isMarried ? 'Splittingtarif (Verheiratet)' : 'Grundtarif (Single)'}</span></div>
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">KV-Status im Alter</span> <span className="font-bold text-base text-slate-800">{kvStatus === 'kvdr' ? 'KVdR (Pflichtversichert)' : kvStatus === 'pkv' ? 'Privat versichert (PKV)' : 'Freiwillig gesetzlich'}</span></div>
+                 <div className="flex flex-col"><span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Inflation / Tarif-Index.</span> <span className="font-bold text-base text-slate-800">{inflationRate.toLocaleString("de-DE")} % p.a. <span className="text-slate-400 font-normal">/ {taxIndexRate.toLocaleString("de-DE")} % p.a.</span></span></div>
+              </div>
            </div>
 
-           {calculations.contracts.length > 0 && (
-               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm break-inside-avoid">
-                  <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                          <tr>
-                             <th className="p-4 font-bold text-slate-600">Schicht / Art</th>
-                             <th className="p-4 font-bold text-slate-600">Vertrag</th>
-                             <th className="p-4 font-bold text-slate-600 text-right">Zahlung (Brutto)</th>
-                          </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                         {calculations.contracts.map(c => (
-                            <tr key={c.id}>
-                               <td className="p-4 uppercase text-[11px] font-bold text-slate-500">{c.type.replace('prvKapital', 'Privat (Kapital)').replace('prvRente', 'Privat (Rente)').replace('bavKapital', 'bAV (Kapital)')}</td>
-                               <td className="p-4 font-bold text-slate-700">
-                                 {c.name} 
-                                 {isMarried && (
-                                   <span className={`ml-2 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-bold ${c.owner === 'B' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
-                                     {c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')}
-                                   </span>
-                                 )}
-                               </td>
-                               <td className="p-4 text-sm font-black text-right text-slate-800">{c.type === 'etf' ? `${formatCurrency(c.capital)}` : c.type.includes('Kapital') ? `${formatCurrency(c.gross)}` : c.type === 'immobilie' ? `${formatCurrency(c.gross)} / M` : `${formatCurrency(c.gross)} / M`}</td>
-                            </tr>
-                         ))}
-                      </tbody>
-                  </table>
-               </div>
+           <div className="mb-6 bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+              <h3 className="font-bold text-slate-800 mb-3 border-b border-slate-100 pb-2">Gesetzliche Basis (Schicht 1)</h3>
+              <div className="flex justify-between items-center bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                 <span className="font-semibold text-slate-700">Brutto-Anspruch heute</span>
+                 <span className="text-xl font-black text-blue-700">{formatCurrency(grvGrossA)} <span className="text-sm font-bold text-blue-500">/ M</span> {isMarried && grvGrossB > 0 ? <span className="text-slate-500 text-sm font-semibold"> & {formatCurrency(grvGrossB)} / M</span> : ''}</span>
+              </div>
+              <div className="text-[10px] text-slate-500 mt-2 text-right uppercase tracking-wider font-bold">Angenommene Rentendynamik: {grvIncreaseRate}% p.a.</div>
+           </div>
+
+           {contracts.length > 0 && (
+             <div className="bg-white border border-slate-200 rounded-xl p-0 shadow-sm overflow-hidden">
+                <div className="p-4 bg-slate-50 border-b border-slate-200"><h3 className="font-bold text-slate-800">Ihre Zusatz-Verträge & Depots</h3></div>
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-white text-slate-400 text-[10px] uppercase tracking-wider border-b border-slate-200">
+                      <th className="p-4 font-bold w-24">Schicht</th><th className="p-4 font-bold w-40">Art</th><th className="p-4 font-bold">Name / Inhaber</th><th className="p-4 font-bold text-right">Wert / Beitrag</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-slate-800">
+                     {contracts.map(c => (
+                        <tr key={c.id} className="border-b border-slate-100 last:border-0">
+                           <td className="p-4"><span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${c.layer === 1 ? 'bg-blue-100 text-blue-700' : c.layer === 2 ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'}`}>Schicht {c.layer}</span></td>
+                           <td className="p-4 uppercase text-[11px] font-bold text-slate-500">{c.type.replace('prvKapital', 'Privat (Kapital)').replace('prvRente', 'Privat (Rente)').replace('bavKapital', 'bAV (Kapital)')}</td>
+                           <td className="p-4 font-bold text-slate-700">{c.name} {isMarried ? <span className="text-slate-400 font-normal">({c.owner === 'A' ? (nameA || 'Person A') : (nameB || 'Person B')})</span> : ''}</td>
+                           <td className="p-4 text-sm font-black text-right text-slate-800">{c.type === 'etf' ? `${formatCurrency(c.capital)}` : c.type.includes('Kapital') ? `${formatCurrency(c.gross)}` : c.type === 'immobilie' ? `${formatCurrency(c.gross)} / M` : `${formatCurrency(c.gross)} / M`}</td>
+                        </tr>
+                     ))}
+                  </tbody>
+                </table>
+             </div>
            )}
         </div>
-
-        {/* PRINT ONLY: ERKLÄR-BOXEN & WASSERFALL */}
-            <div className="hidden print:block mb-8 print:break-after-page">
-               <h2 className="text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-6 text-slate-800">2. Vom Brutto zum Netto (Abzüge erklärt)</h2>
-
-               <div className="grid grid-cols-2 gap-8 mb-6">
-                   {/* Wasserfall */}
-                   <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm break-inside-avoid">
-                       <div className="flex items-center gap-3 mb-4 border-b border-slate-100 pb-2">
-                           <Calculator className="w-5 h-5 text-rose-500" />
-                           <h3 className="font-bold text-slate-800">Ihre Abzüge im Detail</h3>
-                       </div>
-                       
-                       {(() => {
-                           let totalGrossPrint = calculations.grvFutureGrossTotal + (includePlanerInNet ? calculations.finalPlanerWithdrawalGross : 0);
-                           let totalKvPvPrint = calculations.grvKvpv;
-                           let totalTaxPrint = calculations.grvESt + calculations.grvKist + (includePlanerInNet ? (calculations.planerTax + (calculations.planerKist||0)) : 0);
-                   
-                           calculations.contracts.forEach(c => {
-                                const strategy = c.payoutStrategy || (c.includeInNet === false ? 'ignore' : 'rent');
-                                if (strategy === 'rent') {
-                                    if (c.type === 'etf') totalGrossPrint += c.grossMonthly;
-                                    else if (c.type === 'prvKapital' || c.type === 'bavKapital') totalGrossPrint += (c.netCapital * ((c.withdrawalRate || 4) / 100)) / 12;
-                                    else totalGrossPrint += Number(c.gross) || 0;
-                                }
-                                if(!c.type.includes('Kapital')) totalKvPvPrint += (c.kvpv_deduction || 0);
-                                if(!c.type.includes('Kapital')) totalTaxPrint += (c.tax || 0) + (c.kist || 0);
-                           });
-                   
-                           totalGrossPrint = Math.max(totalGrossPrint, calculations.totalNetFuture + totalKvPvPrint + totalTaxPrint);
-                   
-                           return (
-                               <div className="space-y-1.5 text-sm font-medium text-slate-600">
-                                   <div className="flex justify-between items-center bg-slate-100 p-2.5 rounded text-slate-800">
-                                       <span>Gesamte Brutto-Einkünfte</span>
-                                       <span className="font-bold">{formatResultCurrency(totalGrossPrint)}</span>
-                                   </div>
-                                   <div className="flex justify-between items-center p-2.5 text-rose-500">
-                                       <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span> <span>Kranken- & Pflegeversicherung</span></div>
-                                       <span>-{formatResultCurrency(totalKvPvPrint)}</span>
-                                   </div>
-                                   <div className="flex justify-between items-center p-2.5 text-rose-500 border-b border-slate-200">
-                                       <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span> <span>Steuern (ESt. & Abgeltungst.)</span></div>
-                                       <span>-{formatResultCurrency(totalTaxPrint)}</span>
-                                   </div>
-                                   <div className="flex justify-between items-center bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-indigo-900 mt-2 shadow-sm">
-                                       <span className="font-bold uppercase tracking-wider text-xs">Gesamt Netto-Kaufkraft</span>
-                                       <span className="font-black text-lg">{formatResultCurrency(calculations.totalNetFuture)}</span>
-                                   </div>
-                               </div>
-                           );
-                       })()}
-                   </div>
-
-                   {/* Schichten-Erklärung */}
-                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 shadow-sm break-inside-avoid">
-                       <div className="flex items-center gap-3 mb-4 border-b border-slate-200 pb-2">
-                           <Info className="w-5 h-5 text-indigo-500" />
-                           <h3 className="font-bold text-slate-800">Das 3-Schichten-Modell erklärt</h3>
-                       </div>
-                       <ul className="space-y-4 text-xs text-slate-600">
-                          <li className="bg-white p-3 rounded shadow-sm border border-slate-100"><strong className="text-blue-700 block mb-0.5 text-sm">Schicht 1 (Basisversorgung)</strong> Gesetzliche Rente, Pension, Rürup. Das Fundament. Beiträge sind oft steuerlich absetzbar, dafür ist die Rente später (fast) voll zu versteuern.</li>
-                          <li className="bg-white p-3 rounded shadow-sm border border-slate-100"><strong className="text-purple-700 block mb-0.5 text-sm">Schicht 2 (Zusatzversorgung)</strong> Betriebsrente (bAV), Riester. Staatlich oder betrieblich gefördert. In der Auszahlung fallen oft volle Steuern und Krankenkassenbeiträge an.</li>
-                          <li className="bg-white p-3 rounded shadow-sm border border-slate-100"><strong className="text-emerald-700 block mb-0.5 text-sm">Schicht 3 (Privatvermögen)</strong> ETFs, Immobilien, private Renten. Maximale Flexibilität. Versteuert wird oft nur der Ertragsteil oder Gewinnanteil, was im Alter steuerlich sehr günstig ist.</li>
-                       </ul>
-                   </div>
-               </div>
-               
-               <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex gap-3 items-start text-sm text-blue-900 break-inside-avoid">
-                   <ShieldAlert className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
-                   <div><strong className="block mb-1 text-blue-800">Warum brutto nicht gleich netto ist:</strong> Viele Rentner sind überrascht, wenn von 2.000 € Bruttorente nur 1.500 € netto übrig bleiben. Der Grund: Als Rentner zahlen Sie bei Pflichtversicherung (KVdR) ca. 12% für Kranken- und Pflegeversicherung. Zudem wird durch das Alterseinkünftegesetz ein immer größerer Teil Ihrer Rente steuerpflichtig (Kohortenbesteuerung). </div>
-               </div>
-            </div>
 
         {/* LEFT COLUMN: INPUTS */}
         <div className="lg:col-span-6 xl:col-span-5 space-y-4 sm:space-y-6 print:hidden">
@@ -2045,12 +1848,30 @@ export default function App() {
           <div className="flex bg-slate-200/50 p-1 rounded border print:hidden">
             <button onClick={() => setRightView('zusammensetzung')} className={`flex-1 py-1.5 sm:py-2 rounded text-[11px] sm:text-xs font-bold flex justify-center items-center gap-1.5 sm:gap-2 ${rightView === 'zusammensetzung' ? 'bg-white shadow' : 'text-slate-500'}`}><List className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Kassenbon</button>
             <button onClick={() => setRightView('verlauf')} className={`flex-1 py-1.5 sm:py-2 rounded text-[11px] sm:text-xs font-bold flex justify-center items-center gap-1.5 sm:gap-2 ${rightView === 'verlauf' ? 'bg-white shadow' : 'text-slate-500'}`}><LineChartIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Verlauf</button>
-            <button onClick={() => setRightView('planer')} className={`flex-1 py-1.5 sm:py-2 rounded text-[11px] sm:text-xs font-bold flex justify-center items-center gap-1.5 sm:gap-2 ${rightView === 'planer' ? 'bg-white shadow' : 'text-slate-500'}`}><InfinityIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Entnahmeplan</button>
           </div>
 
           <div className={`bg-white rounded-xl shadow-sm border p-4 sm:p-6 print:block print:break-inside-avoid ${rightView === 'zusammensetzung' ? 'block' : 'hidden'}`}>
-            <h2 className="text-xs sm:text-sm font-bold text-slate-800 mb-4 sm:mb-6 border-b border-slate-100 pb-2 print:hidden">Zusammensetzung (Netto)</h2>
-            <h2 className="hidden print:block text-xl font-bold uppercase tracking-widest border-b-2 border-slate-200 pb-2 mb-6 text-slate-800 mt-8">3. Detaillierte Zusammensetzung (Netto)</h2>
+            <h2 className="text-xs sm:text-sm font-bold mb-3 sm:mb-4 print:hidden">Ihr Haushalts-Netto im Jahr {calculations.baseRetYear}</h2>
+            
+            <div className="mb-5 sm:mb-6 print:mt-4">
+              <div className="flex justify-between text-[9px] sm:text-[10px] text-slate-500 font-bold uppercase mb-1">
+                <span>Ziel-Erreichung</span>
+                <span>{calculations.gap > 0 && calculations.targetIncomeFuture > 0 ? `${((calculations.totalNetFuture / calculations.targetIncomeFuture) * 100).toFixed(1)} % erreicht` : 'Ziel erreicht / übertroffen'}</span>
+              </div>
+              <div className="h-3 sm:h-4 w-full bg-slate-100 rounded-full flex overflow-hidden shadow-inner border border-slate-200" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}>
+                {(calculations.s1_net > 0) && <div style={{ width: `${(calculations.s1_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-blue-500 transition-all duration-500"></div>}
+                {(calculations.s2_net > 0) && <div style={{ width: `${(calculations.s2_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-purple-500 transition-all duration-500"></div>}
+                {(calculations.s3_net > 0) && <div style={{ width: `${(calculations.s3_net / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-emerald-500 transition-all duration-500"></div>}
+                {(calculations.gap > 0) && <div style={{ width: `${(calculations.gap / Math.max(calculations.targetIncomeFuture, calculations.totalNetFuture) || 1) * 100}%`, printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }} className="bg-white transition-all duration-500"></div>}
+              </div>
+              <div className="flex gap-2 sm:gap-3 mt-1.5 sm:mt-2 text-[8px] sm:text-[9px] font-semibold text-slate-500 flex-wrap">
+                <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-blue-500" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></span> Schicht 1</div>
+                <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-purple-500" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></span> Schicht 2</div>
+                <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-500" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></span> Schicht 3</div>
+                {calculations.gap > 0 && <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-white border border-slate-300" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}></span> Lücke</div>}
+              </div>
+            </div>
+
             <div className="space-y-3 sm:space-y-4">
               <div className="border border-blue-100 rounded-lg print:border-slate-300 overflow-hidden mb-2 sm:mb-3">
                 <div className="flex justify-between p-2.5 sm:p-4 bg-white cursor-pointer print:bg-white border-b border-blue-50" onClick={() => toggleSection('s1')}>
@@ -2174,51 +1995,6 @@ export default function App() {
                <div className="hidden sm:block w-px h-6 bg-slate-300 mx-1"></div>
                <button onClick={() => setManualChartStart(null)} className="w-full sm:w-auto justify-center text-[11px] sm:text-xs flex items-center gap-1.5 bg-white border border-slate-300 text-slate-600 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-100 hover:text-indigo-600 transition-all shadow-sm" title="Zurück zum Renteneintritt springen"><Clock className="w-3.5 h-3.5" /> Fokus Rente</button>
             </div>
-          </div>
-
-          <div className={`bg-white rounded-xl border p-4 sm:p-6 h-auto print:block print:mt-8 print:break-inside-avoid ${rightView === 'planer' ? 'block' : 'hidden'}`}>
-             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 sm:gap-0 mb-4 sm:mb-6">
-                <h2 className="text-xs sm:text-sm font-bold text-slate-800">Entnahmeplan (Kapitalverzehr)</h2>
-                <div className="text-[10px] sm:text-xs text-slate-500 font-medium">Laufzeit: <strong className="text-indigo-600">{planerDuration} Jahre</strong></div>
-             </div>
-             
-             {planerTableData.length > 0 ? (
-                 <div className="overflow-x-auto hide-scrollbar rounded-xl border border-slate-200">
-                     <table className="w-full text-left text-[10px] sm:text-xs whitespace-nowrap">
-                         <thead>
-                             <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 uppercase tracking-wider">
-                                 <th className="px-2 py-3 sm:p-3 font-bold">Jahr <span className="hidden sm:inline">/ Alter</span></th>
-                                 <th className="px-2 py-3 sm:p-3 font-bold">Beginn</th>
-                                 <th className="px-2 py-3 sm:p-3 font-bold text-emerald-600 text-right">+ Zins <span className="hidden sm:inline">({planerReturn}%)</span></th>
-                                 <th className="px-2 py-3 sm:p-3 font-bold text-rose-600 text-right">- Entnahme</th>
-                                 <th className="px-2 py-3 sm:p-3 font-bold text-right">Ende</th>
-                             </tr>
-                         </thead>
-                         <tbody className="text-slate-700">
-                             {planerTableData.map((row, idx) => (
-                                 <tr key={row.year} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${idx === planerTableData.length - 1 ? 'border-b-0' : ''}`}>
-                                     <td className="px-2 py-2.5 sm:p-3 font-medium text-slate-700 border-r border-slate-100">{row.year}. <span className="text-[8px] sm:text-[9px] text-slate-400 ml-0.5">({row.age})</span></td>
-                                     <td className="px-2 py-2.5 sm:p-3">{formatResultCurrency(row.startCapital)}</td>
-                                     <td className="px-2 py-2.5 sm:p-3 text-emerald-600 text-right">+{formatResultCurrency(row.interest)}</td>
-                                     <td className="px-2 py-2.5 sm:p-3 text-rose-600 font-bold text-right">-{formatResultCurrency(row.withdrawal)}</td>
-                                     <td className="px-2 py-2.5 sm:p-3 font-bold text-right border-l border-slate-100 bg-slate-50/50">{formatResultCurrency(row.endCapital)}</td>
-                                 </tr>
-                             ))}
-                         </tbody>
-                     </table>
-                 </div>
-             ) : (
-                 <div className="text-center p-8 text-slate-500 text-xs sm:text-sm bg-slate-50 rounded-xl border border-slate-200 border-dashed">
-                     Kein Kapital im Planer vorhanden oder Dauer ist 0.
-                 </div>
-             )}
-             
-             {planerTableData.length > 0 && (
-                 <div className="mt-4 p-3 bg-indigo-50/50 rounded-lg border border-indigo-100 text-[10px] sm:text-xs text-indigo-900 leading-relaxed">
-                     <strong className="block mb-1">So lesen Sie diese Tabelle:</strong>
-                     Das Kapital zu Beginn jedes Jahres wird mit {planerReturn}% verzinst. Gleichzeitig wird Ihre Wunschrente (inkl. {planerDynamic}% jährlicher Dynamik) entnommen. Am Ende der Laufzeit ({planerDuration} Jahre) ist das Kapital planmäßig vollständig verzehrt.
-                 </div>
-             )}
           </div>
 
           <div className="bg-slate-900 rounded-xl border border-slate-800 text-white print:bg-white print:text-slate-800 print:border-slate-300 print:break-inside-avoid overflow-hidden">
@@ -2364,29 +2140,16 @@ export default function App() {
 
                                  <div className="space-y-3 sm:space-y-4 print:space-y-3">
                                      {item.cType !== 'riester' && (
-                                         <>
-                                             <div className="flex items-center gap-2 mb-2 sm:mb-3">
-                                                 <input type="checkbox" checked={!!item.isSinglePremium} onChange={e => updateTuevItem(item.id, 'isSinglePremium', e.target.checked)} className="rounded text-indigo-600 w-3 h-3 sm:w-3.5 sm:h-3.5 cursor-pointer" id={`single-${item.id}`} />
-                                                 <label htmlFor={`single-${item.id}`} className="text-[10px] sm:text-[11px] text-slate-600 font-bold uppercase tracking-wider cursor-pointer">Einmalbeitrags-Produkt</label>
+                                         <div className="grid grid-cols-2 gap-3 sm:gap-4 print:gap-3 mb-2 sm:mb-4">
+                                             <div>
+                                                 <label className="block text-[9px] sm:text-[11px] font-bold text-slate-500 mb-1 print:mb-1">{item.cType === 'etf' ? 'Sparrate (Start)' : 'Beitrag (Start)'}</label>
+                                                 <input type="number" value={item.grossMonthly} onChange={e => updateTuevItem(item.id, 'grossMonthly', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-1.5 sm:p-2 print:p-1.5 text-xs sm:text-sm font-semibold bg-white shadow-sm print:shadow-none" />
                                              </div>
-                                             {item.isSinglePremium ? (
-                                                 <div className="mb-2 sm:mb-4">
-                                                     <label className="block text-[9px] sm:text-[11px] font-bold text-slate-500 mb-1 print:mb-1">Einmalbeitrag (€)</label>
-                                                     <input type="number" value={item.singlePremium ?? ''} onChange={e => updateTuevItem(item.id, 'singlePremium', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-1.5 sm:p-2 print:p-1.5 text-xs sm:text-sm font-semibold bg-white shadow-sm print:shadow-none" />
-                                                 </div>
-                                             ) : (
-                                                 <div className="grid grid-cols-2 gap-3 sm:gap-4 print:gap-3 mb-2 sm:mb-4">
-                                                     <div>
-                                                         <label className="block text-[9px] sm:text-[11px] font-bold text-slate-500 mb-1 print:mb-1">{item.cType === 'etf' ? 'Sparrate (Start)' : 'Beitrag (Start)'}</label>
-                                                         <input type="number" value={item.grossMonthly} onChange={e => updateTuevItem(item.id, 'grossMonthly', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-1.5 sm:p-2 print:p-1.5 text-xs sm:text-sm font-semibold bg-white shadow-sm print:shadow-none" />
-                                                     </div>
-                                                     <div>
-                                                         <label className="block text-[9px] sm:text-[11px] font-bold text-slate-500 mb-1 print:mb-1">Dyn. p.a. (%)</label>
-                                                         <input type="number" step="0.1" value={item.dynamic || 0} onChange={e => updateTuevItem(item.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-1.5 sm:p-2 print:p-1.5 text-xs sm:text-sm font-semibold bg-white shadow-sm print:shadow-none" />
-                                                     </div>
-                                                 </div>
-                                             )}
-                                         </>
+                                             <div>
+                                                 <label className="block text-[9px] sm:text-[11px] font-bold text-slate-500 mb-1 print:mb-1">Dyn. p.a. (%)</label>
+                                                 <input type="number" step="0.1" value={item.dynamic || 0} onChange={e => updateTuevItem(item.id, 'dynamic', parseNum(e.target.value))} className="w-full border border-slate-300 rounded-md p-1.5 sm:p-2 print:p-1.5 text-xs sm:text-sm font-semibold bg-white shadow-sm print:shadow-none" />
+                                             </div>
+                                         </div>
                                      )}
 
                                      {item.cType === 'riester' && (
@@ -2472,9 +2235,7 @@ export default function App() {
                                  <div className="bg-slate-50 rounded-xl print:rounded-lg p-2.5 sm:p-3 print:p-2.5 border border-slate-200">
                                      <div className="text-xs sm:text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">Ihre Belastung (Ansparphase)</div>
                                      <div className="space-y-1 mb-2 relative group">
-                                         {item.isSinglePremium ? (
-                                             <div className="flex justify-between text-xs sm:text-sm text-slate-600"><span>Einmalbeitrag:</span> <span className="font-bold">{formatCurrency(item.singlePremium)}</span></div>
-                                         ) : item.cType === 'riester' ? (
+                                         {item.cType === 'riester' ? (
                                              <>
                                                 <div className="flex justify-between text-xs sm:text-sm text-slate-600"><span>Mtl. Eigenbeitrag (Start):</span> <span className="font-bold">{formatCurrency(item.grossMonthly)}</span></div>
                                                 <div className="flex justify-between text-xs sm:text-sm text-emerald-600" title="Zulagen mindern nicht den monatlichen Aufwand, sondern fließen zusätzlich in Vertrag."><span>+ Zulagen (in Vertrag) <Info className="w-3 h-3 inline opacity-50"/>:</span> <span className="font-bold">+ {formatCurrency(item.snapshotZulage)}</span></div>
